@@ -22,7 +22,7 @@ class GeminiService:
         """
         self.api_key = os.getenv('GEMINI_API_KEY')
         if not self.api_key:
-            raise ValueError("GEMINI_API_KEY not found.")
+            raise ValueError("GEMINI_API_KEY not found!")
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models/"
         self.default_model = default_model
         self.headers = {

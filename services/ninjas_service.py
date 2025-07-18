@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import requests
 from dotenv import load_dotenv
@@ -10,23 +10,72 @@ load_dotenv()
 
 class NinjasService:
     """
-    A service class to interact with the API-Ninjas Earnings Call Transcript API.
-    Fetches raw earnings call transcripts for specified companies and quarters,
-    now with confirmed speaker split data!
+    A service class to interact with API-Ninjas for various data.
+    Currently fetches earnings call transcripts (with speaker splits!)
+    and basic company profile information.
     """
 
     def __init__(self):
-        """
-        Initializes the NinjasService.
-        """
+        """Initializes the NinjasService."""
         self.api_key = os.getenv('API_NINJAS_KEY')
         if not self.api_key:
-            raise ValueError("API_NINJAS_KEY not found.")
-        self.base_url = "https://api.api-ninjas.com/v1/earningstranscript"
+            raise ValueError("API_NINJAS_KEY not found!")
+
+        self.base_url = "https://api.api-ninjas.com/v1/"
         self.headers = {
             'X-Api-Key': self.api_key
         }
-        print("NinjasService initialized. Ready to fetch transcripts (with glorious splits)!")
+        print("NinjasService initialized. Ready to fetch data from API Ninjas!")
+
+    def _make_request(self, endpoint: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Internal method to construct and send a generic GET API Ninjas request.
+        Handles common error logging and JSON parsing.
+
+        Args:
+            endpoint (str): The specific API Ninjas endpoint (e.g., "earningstranscript", "logo").
+            params (Dict[str, Any]): Dictionary of query parameters for the request.
+
+        Returns:
+            Optional[Dict[str, Any]]: The JSON response data as a dictionary, or None if no data.
+
+        Raises:
+            requests.exceptions.RequestException: For network-related errors.
+            ValueError: For API errors (non-2xx status codes) or unexpected response format.
+        """
+        url = f"{self.base_url}{endpoint}"
+        print(f"Making request to {url} with params: {params}...")
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
+            response.raise_for_status()
+
+            response_json = response.json()
+
+            if isinstance(response_json, list) and not response_json:
+                print(f"No data found for the given parameters.")
+                return None
+            elif isinstance(response_json, list) and response_json:
+                # If the API returns a list (e.g., /v1/logo), take the first relevant item
+                return response_json[0]
+            elif isinstance(response_json, dict):
+                # If the API returns a single dictionary (e.g., /v1/earningstranscript)
+                return response_json
+            else:
+                raise ValueError(
+                    f"Unexpected top-level response format from API Ninjas: {type(response_json)}. Full response: {response.text}")
+
+        except requests.exceptions.HTTPError as e:
+            error_message = f"API Ninjas returned an HTTP error {e.response.status_code}: {e.response.text}"
+            print(f"Error details from API Ninjas: {e.response.text}")
+            raise ValueError(error_message) from e
+        except requests.exceptions.ConnectionError as e:
+            raise requests.exceptions.RequestException(f"Network connection error to API Ninjas: {e}") from e
+        except requests.exceptions.Timeout as e:
+            raise requests.exceptions.RequestException(f"API Ninjas request timed out: {e}") from e
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to decode JSON from API Ninjas response: {e}. Response: {response.text}") from e
+        except Exception as e:
+            raise Exception(f"An unknown error occurred during API call to API Ninjas: {e}") from e
 
     def get_earnings_transcript(self, ticker: str, year: int, quarter: int) -> Optional[Dict[str, Any]]:
         """
@@ -49,8 +98,7 @@ class NinjasService:
                                       Returns None if the transcript is not found or an error occurs.
 
         Raises:
-            requests.exceptions.RequestException: For network-related errors.
-            ValueError: For API errors (non-2xx status codes) or unexpected response format.
+            ValueError, RequestException (propagated from _make_request)
         """
         if not (1 <= quarter <= 4):
             raise ValueError("Quarter must be between 1 and 4.")
@@ -63,59 +111,70 @@ class NinjasService:
             'quarter': quarter
         }
 
-        print(f"Fetching transcript for {ticker.upper()} Q{quarter} {year} (expecting split!)...")
-        try:
-            response = requests.get(self.base_url, headers=self.headers, params=params, timeout=30)
-            response.raise_for_status()
+        transcript_data = self._make_request("earningstranscript", params)
 
-            response_json = response.json()
+        if not transcript_data:
+            print(f"No transcript found for {ticker} Q{quarter} {year}. The silence is still deafening.")
+            return None
 
-            if isinstance(response_json, list) and not response_json:
-                print(f"No transcript found for {ticker} Q{quarter} {year}. The silence is still deafening.")
-                return None
-            elif isinstance(response_json, list) and response_json:
-                transcript_data = response_json[0]
-            elif isinstance(response_json, dict):
-                transcript_data = response_json
-            else:
-                raise ValueError(
-                    f"Unexpected top-level response format from API Ninjas: {type(response_json)}. Full response: {response.text}")
+        # Extract the necessary fields, including the split
+        date = transcript_data.get('date')
+        transcript_text = transcript_data.get('transcript')
+        transcript_split = transcript_data.get('transcript_split')
 
-            # Extract the necessary fields, including the split
-            date = transcript_data.get('date')
-            transcript_text = transcript_data.get('transcript')
-            transcript_split = transcript_data.get('transcript_split')
+        if not transcript_text:
+            print(f"Transcript text missing in response for {ticker} Q{quarter} {year}. Just empty words.")
+            return None
 
-            if not transcript_text:
-                print(f"Transcript text missing in response for {ticker} Q{quarter} {year}. Just empty words.")
-                return None
+        return {
+            "date": date,
+            "transcript": transcript_text,
+            "transcript_split": transcript_split
+        }
 
-            return {
-                "date": date,
-                "transcript": transcript_text,
-                "transcript_split": transcript_split
-            }
+    def get_company_profile_basic(self, ticker: str) -> Optional[Dict[str, str]]:
+        """
+        Fetches basic company profile information (name, symbol) using API Ninjas' Logo API.
 
-        except requests.exceptions.HTTPError as e:
-            error_message = f"API Ninjas returned an HTTP error {e.response.status_code}: {e.response.text}"
-            print(f"Error details from API Ninjas: {e.response.text}")
-            raise ValueError(error_message) from e
-        except requests.exceptions.ConnectionError as e:
-            raise requests.exceptions.RequestException(f"Network connection error to API Ninjas: {e}") from e
-        except requests.exceptions.Timeout as e:
-            raise requests.exceptions.RequestException(f"API Ninjas request timed out: {e}") from e
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to decode JSON from API Ninjas response: {e}. Response: {response.text}") from e
-        except (KeyError, IndexError) as e:
-            raise ValueError(
-                f"Unexpected response format from API Ninjas. "
-                f"Could not extract expected data. Error: {e}. Full response: {json.dumps(data, indent=2)}"
-            )
-        except Exception as e:
-            raise Exception(f"An unknown error occurred during API call to NinjasService: {e}") from e
+        Args:
+            ticker (str): The stock ticker symbol (e.g., "AAPL", "MSFT").
+
+        Returns:
+            Optional[Dict[str, str]]: A dictionary containing 'name', 'symbol' (ticker) and 'logo',
+                                      or None if the company is not found.
+                                      Example: {"name": "Microsoft Corp", "ticker": "MSFT", "image": "..."}
+
+        Raises:
+            ValueError, RequestException (propagated from _make_request)
+        """
+        params = {
+            'ticker': ticker.upper()
+        }
+
+        company_data = self._make_request("logo", params)
+
+        if not company_data:
+            print(f"No basic profile found for ticker {ticker}.")
+            return None
+
+        company_name = company_data.get('name')
+        company_symbol = company_data.get('ticker')
+        company_logo_url = company_data.get('image')
+
+        if not company_name or not company_symbol or not company_logo_url:
+            print(f"Missing 'name', 'ticker', or 'logo' in basic profile for {ticker}. Incomplete data!")
+            return None
+
+        return {
+            "name": company_name,
+            "symbol": company_symbol,
+            "logo_url": company_logo_url,
+        }
 
 
 ninjas_service = NinjasService()
+
+# --- Test Case 1: Fetch a known transcript (e.g., Microsoft Q2 2024) ---
 print("\n--- Testing fetching Microsoft Q2 2024 transcript (with split confirmation) ---")
 msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2024, quarter=2)
 if msft_transcript:
@@ -128,3 +187,12 @@ if msft_transcript:
         print("Transcript Split NOT detected (unexpected, but possible for some data points).")
 else:
     print("Failed to retrieve MSFT transcript.")
+
+# --- Test Case 2: Fetch basic company profile ---
+print("\n--- Testing fetching basic company profile for Google (GOOGL) ---")
+googl_profile = ninjas_service.get_company_profile_basic(ticker="GOOG")
+if googl_profile:
+    print(f"Company Name: {googl_profile.get('name')}")
+    print(f"Ticker Symbol: {googl_profile.get('symbol')}\n")
+else:
+    print("Failed to retrieve GOOGL company profile.")
