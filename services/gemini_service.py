@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class GeminiService:
     """
     A service class to interact with the Google Gemini API.
