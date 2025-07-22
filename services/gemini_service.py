@@ -9,8 +9,8 @@ load_dotenv()
 
 class GeminiService:
     """
-    A service class to interact with the Google Gemini API.
-    Encapsulates API calls, making them cleaner and reusable.
+    A service class to interact with the Google Gemini models (e.g., gemini-2.5-flash).
+    Designed to provide analysis on earnings call transcripts.
     """
 
     def __init__(self, default_model: str = "gemini-2.5-flash"):
@@ -20,7 +20,7 @@ class GeminiService:
         Args:
             default_model (str): The default Gemini model to use for content generation.
         """
-        self.api_key = os.getenv('GEMINI_API_KEY')
+        self.api_key = os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not found!")
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -104,6 +104,16 @@ class GeminiService:
             )
 
 
+# TESTING
+
+Prompt_Content = """
+You are a financial analyst AI specializing in dissecting earnings call transcripts. Your goal is to provide concise, factual, and insightful analysis, identifying sentiment, key topics, and any signs of management spin or evasiveness. Focus on the financial implications.
+Given the following earnings call transcript: 
+CEO: "We've had a truly transformative quarter, navigating significant macroeconomic headwinds with unparalleled agility. Our strategic repositioning initiatives are yielding promising preliminary indicators, suggesting robust potential for enhanced shareholder value in the mid-to-long term."
+Analyst: "Can you provide more specific guidance on revenue growth for the next fiscal year, given the recent market volatility?"
+CFO: "As we've stated, our focus remains on operational efficiencies and prudently managing our cost structure. While we are observing certain market fluctuations, our internal projections remain cautiously optimistic regarding our capacity to deliver sustainable returns. We are not providing granular forward-looking revenue guidance at this juncture, preferring to allow our ongoing investments in innovation to speak for themselves."
+Identify the overall sentiment of the earnings call, specifically noting any corporate jargon or evasive language used by management regarding future guidance.
+"""
 gemini_service = GeminiService()
-ai_explanation = gemini_service.generate_content("Explain how AI works in a few words")
+ai_explanation = gemini_service.generate_content(Prompt_Content)
 print(f"AI Explanation: {ai_explanation}\n")

@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 import requests
 from dotenv import load_dotenv
@@ -171,6 +171,8 @@ class NinjasService:
             "logo_url": company_logo_url,
         }
 
+
+# TESTING
 
 ninjas_service = NinjasService()
 
