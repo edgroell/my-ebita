@@ -1,7 +1,9 @@
 
 # My EBITA
 
-This app aims at collecting all your favorite movies (or all that you want really) and display this collection into a beautiful HTML frontend.
+An AI Financial Sidekick. My EBITA stands for Earnings Beat Indicator & Text Analyzer.
+
+This application is designed for the discerning investor who wants to look past the numbers. It provides a simple, clean interface to acquire earnings call transcripts and run a dual analysis using both Gemini and ChatGPT. The goal is to provide a comprehensive, "between-the-lines" look at management sentiment, confidence, and potential red flags, all on a single, easy-to-read report.
 
 TODO screenshot
 
@@ -12,36 +14,42 @@ To install this app, simply clone the repository and install the dependencies in
 ```bash
    pip install -r requirements.txt
 ```
+You'll also need to configure your API keys for the AI models and the data acquisition service in a .env file.
 
 ## Usage
 
+_The app is currently a local Flask application, not publicly deployed._
 TODO URL if deployed
 
-To use this app, run the following command `python my_movies.py`
-> - The app now supports multi-users with individual collection and website for each user, you'll first be prompted to select a user (you may Add, Delete, or Update a user)
-> - You may add a new user, update an existing username or delete one
+To use this app, run the following command `python app.py`
+>- The app supports multiple users with individual analysis reports and collections. You will be prompted to log in or register a new account.
+>- The core of the app is the Dashboard, where you can acquire new earnings call transcripts and run your analysis.
 
-Once the user selected, you'll be presented with your movies list:
-> - You can add a new movie by typing in a title, the app will fetch the data from the OMDB API
-> - Once in your list, you may update the movie title, should the official one not be to your liking
-> - You may also add a personal note for each movie
-> - Finally, you may delete a movie that's on your list
+Acquiring a Transcript
+>- On the dashboard, enter a Ticker Symbol, Fiscal Year, and Fiscal Quarter. The app will fetch the transcript from the API Ninjas service.
+>- If a transcript already exists, you will be notified and can proceed to analysis.
+>- Transcripts are stored in your private collection, and can be viewed or deleted from the dashboard.
+
+Running an Analysis
+>- Once a transcript is acquired, enter its Transcript ID into the "Analyze Transcript" form.
+>- You can optionally provide a custom analysis prompt. If left blank, a default prompt will be used to generate a structured report.
+>- The app will then send the transcript to both Gemini and ChatGPT for a dual AI analysis. The result is a single, comparative report.
+>- Analysis reports are stored per user and can be viewed or deleted from the dashboard.
 
 ## Project Status
 
-As of _07-JUL-2025_, project is: _MVP_
+As of _23-JUL-2025_, project is: _MVP_
 
 ## Room for Improvement
 
-> - While adding a new movie, a list of results could be provided to the user instead of selecting the first one returned
-> - More data could be provided on the frontend
-> - Some KPIs could be presented to the user
-> - Random Movie or AI recommendation
-> - Search function
-> - Sorting function
-> - Filter function
+>- Integration with more robust data APIs for company profiles (industry, sector, etc.).
+>- Implement a user-driven search, sort, and filter functionality for transcripts and reports.
+>- Add a user profile management page with a password reset function.
+>- Develop a custom, conversational analysis feature where users can ask follow-up questions to the AI models.
+>- Add a feature to download reports.
+>- Create a feature to flag transcripts for future analysis or review.
+
 > - Log and API limits
-> - Password-protected user selection
 > - Apply CSS framework (Bootstrap or Bulma)
 > - Include images from Unsplash
 > - Include icons from Font Awesome
