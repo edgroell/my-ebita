@@ -1,15 +1,16 @@
 """
-Module containing all data models of the app.
+Module containing all data models of the app for EBITA (Earnings Beat Indicator & Text Analyzer).
 Designed for SQLite using Flask-SQLAlchemy.
 """
 
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import UniqueConstraint, event
+from sqlalchemy import UniqueConstraint
 from datetime import datetime
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
+# Initialize SQLAlchemy
 db = SQLAlchemy()
 
 def get_current_datetime():
@@ -38,7 +39,6 @@ class User(db.Model, UserMixin):
 
     # Relationships
     analysis_reports = db.relationship('AnalysisReport', backref='user', lazy=True, cascade="all, delete-orphan")
-    watchlists = db.relationship('UserWatchlist', backref='user', lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User {self.username} (Active: {self.is_active})>"
@@ -56,7 +56,6 @@ class Company(db.Model):
 
     # Relationships
     earnings_call_transcripts = db.relationship('EarningsCallTranscript', backref='company', lazy=True)
-    watchlist_items = db.relationship('UserWatchlist', backref='company', lazy=True)
 
     def __repr__(self):
         return f"<Company {self.ticker_symbol} ({self.company_name})>"
@@ -78,8 +77,8 @@ class EarningsCallTranscript(db.Model):
     __table_args__ = (UniqueConstraint('ticker_symbol', 'fiscal_year', 'fiscal_quarter',
                                        name='_ticker_fiscal_year_quarter_uc'),)
 
-    # Relationship to Analysis Reports
-    analysis_reports = db.relationship('AnalysisReport', backref='transcript', lazy=True)
+    # Relationships
+    analysis_reports = db.relationship('AnalysisReport', back_populates='transcript', lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Transcript {self.ticker_symbol} FY{self.fiscal_year} Q{self.fiscal_quarter}>"
@@ -95,8 +94,17 @@ class AnalysisReport(db.Model):
     transcript_id = db.Column(db.Integer, db.ForeignKey('earnings_call_transcripts.transcript_id'), nullable=False)
     analysis_date = db.Column(db.DateTime, nullable=False, default=get_current_datetime)
 
+    # Relationships
+    transcript = db.relationship(
+        'EarningsCallTranscript',
+        foreign_keys=[transcript_id],
+        back_populates='analysis_reports',
+        lazy=True,
+        overlaps="_transcript_backref,analysis_reports"
+    )
+
     # --- Gemini Analysis Fields ---
-    gemini_summary = db.Column(db.Text) # Nullable, as analysis might fail for one model
+    gemini_summary = db.Column(db.Text)
     gemini_overall_sentiment = db.Column(db.String(50))
     gemini_sentiment_scores_by_segment = db.Column(db.JSON)
     gemini_management_confidence_score = db.Column(db.Float)
@@ -106,7 +114,7 @@ class AnalysisReport(db.Model):
     gemini_raw_response_json = db.Column(db.JSON)
 
     # --- ChatGPT Analysis Fields ---
-    chatgpt_summary = db.Column(db.Text) # Nullable, as analysis might fail for one model
+    chatgpt_summary = db.Column(db.Text)
     chatgpt_overall_sentiment = db.Column(db.String(50))
     chatgpt_sentiment_scores_by_segment = db.Column(db.JSON)
     chatgpt_management_confidence_score = db.Column(db.Float)
@@ -117,24 +125,8 @@ class AnalysisReport(db.Model):
 
     comparison_notes = db.Column(db.Text)
 
-    # Ensure a user can generate multiple comparison reports for the same transcript over time
-    # The 'analysis_date' should ensure uniqueness if multiple analyses are run.
     __table_args__ = (UniqueConstraint('user_id', 'transcript_id', 'analysis_date',
                                        name='_user_transcript_date_uc'),)
 
     def __repr__(self):
         return f"<AnalysisReport {self.report_id} on Transcript {self.transcript_id} for User {self.user_id} ({self.analysis_date.isoformat()})>"
-
-class UserWatchlist(db.Model):
-    """Allows users to create and manage lists of stocks they want to track."""
-    __tablename__ = 'user_watchlists'
-    watchlist_item_id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=False)
-    ticker_symbol = db.Column(db.String(10), db.ForeignKey('companies.ticker_symbol'), nullable=False)
-    added_at = db.Column(db.DateTime, nullable=False, default=get_current_datetime)
-
-    # Unique constraint to ensure a user cannot add the same stock to their watchlist multiple times
-    __table_args__ = (UniqueConstraint('user_id', 'ticker_symbol', name='_user_ticker_watchlist_uc'),)
-
-    def __repr__(self):
-        return f"<WatchlistItem User {self.user_id} - {self.ticker_symbol}>"
