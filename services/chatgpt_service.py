@@ -79,7 +79,7 @@ class ChatGPTService:
             return {"error": f"An unexpected error occurred: {e}", "success": False}
 
 
-# TESTING (Only runs when chatgpt_service.py is executed directly)
+# TESTING
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv

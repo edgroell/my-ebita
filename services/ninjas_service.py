@@ -170,7 +170,7 @@ class NinjasService:
         }
 
 
-# TESTING (Only runs when ninjas_service.py is executed directly)
+# TESTING
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv

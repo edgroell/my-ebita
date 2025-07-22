@@ -151,7 +151,7 @@ class GeminiService:
             raise ValueError(f"Failed to decode JSON from Gemini response: {e}. Raw content: {raw_generated_text[:500]}")
 
 
-# TESTING (Only runs when gemini_service.py is executed directly)
+# TESTING
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv
