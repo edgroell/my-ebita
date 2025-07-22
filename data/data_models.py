@@ -1,5 +1,5 @@
 """
-Module containing all data models of the app for EBITA (Earnings Beat Indicator & Text Analyzer).
+Module containing all data models of the app.
 Designed for SQLite using Flask-SQLAlchemy.
 """
 
@@ -10,7 +10,6 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
 
-# Initialize SQLAlchemy
 db = SQLAlchemy()
 
 def get_current_datetime():
