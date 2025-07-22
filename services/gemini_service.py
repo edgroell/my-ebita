@@ -1,10 +1,6 @@
-import os
 import json
 
 import requests
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class GeminiService:
@@ -13,22 +9,25 @@ class GeminiService:
     Designed to provide analysis on earnings call transcripts.
     """
 
-    def __init__(self, default_model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str, default_model: str = "gemini-2.5-flash"):
         """
         Initializes the GeminiService.
 
         Args:
+            api_key (str): The API key to authenticate with the Gemini API.
             default_model (str): The default Gemini model to use for content generation.
         """
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        if not self.api_key:
-            raise ValueError("GEMINI_API_KEY not found!")
+        if not api_key:
+            raise ValueError("Gemini API key cannot be empty.")
+
+        self.api_key = api_key
         self.base_url = "https://generativelanguage.googleapis.com/v1beta/models/"
         self.default_model = default_model
         self.headers = {
             'Content-Type': 'application/json',
             'X-goog-api-key': self.api_key
         }
+        print(f"GeminiService initialized with model: {self.default_model}")
 
     def _make_request(self, model_name: str, contents: list) -> dict:
         """
@@ -69,6 +68,43 @@ class GeminiService:
         except Exception as e:
             raise Exception(f"An unknown error occurred during API call: {e}") from e
 
+    def analyze_transcript(self, transcript_text: str, user_prompt: str, model_name: str = None) -> dict:
+        """
+        Sends an earnings call transcript and a user-defined prompt to the Gemini model
+        for analysis. This method matches the signature of ChatGPTService.analyze_transcript.
+
+        Args:
+            transcript_text (str): The full text of the earnings call transcript.
+            user_prompt (str): The specific instruction for the AI (e.g., "Summarize key points,
+                                identify overall sentiment, and highlight any evasive language
+                                from management regarding future guidance.").
+            model_name (str, optional): Override the default model for this specific call.
+
+        Returns:
+            dict: A dictionary containing the AI's analysis, or an error message.
+                  Example: {"analysis": "...", "model_used": "gemini-2.5-flash", "success": True}
+        """
+        model_to_use = model_name if model_name else self.default_model
+
+        # Combine transcript and user prompt into a single, comprehensive prompt
+        full_prompt = (
+            "You are a financial analyst AI specializing in dissecting earnings call transcripts. "
+            "Your goal is to provide concise, factual, and insightful analysis, identifying sentiment, "
+            "key topics, and any signs of management spin or evasiveness. Focus on the financial implications.\n\n"
+            f"Here is an earnings call transcript:\n\n---\n{transcript_text}\n---\n\n"
+            f"Based on the transcript, {user_prompt}"
+        )
+
+        try:
+            generated_text = self.generate_content(full_prompt, model_name=model_to_use)
+            return {
+                "analysis": generated_text,
+                "model_used": model_to_use,
+                "success": True
+            }
+        except (ValueError, requests.exceptions.RequestException, Exception) as e:
+            return {"error": f"Failed to get analysis from Gemini: {e}", "success": False}
+
     def generate_content(self, prompt_text: str, model_name: str = None) -> str:
         """
         Generates content from a text prompt using the Gemini API.
@@ -104,16 +140,43 @@ class GeminiService:
             )
 
 
-# TESTING
+# TESTING (Only runs when gemini_service.py is executed directly)
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
 
-Prompt_Content = """
-You are a financial analyst AI specializing in dissecting earnings call transcripts. Your goal is to provide concise, factual, and insightful analysis, identifying sentiment, key topics, and any signs of management spin or evasiveness. Focus on the financial implications.
-Given the following earnings call transcript: 
-CEO: "We've had a truly transformative quarter, navigating significant macroeconomic headwinds with unparalleled agility. Our strategic repositioning initiatives are yielding promising preliminary indicators, suggesting robust potential for enhanced shareholder value in the mid-to-long term."
-Analyst: "Can you provide more specific guidance on revenue growth for the next fiscal year, given the recent market volatility?"
-CFO: "As we've stated, our focus remains on operational efficiencies and prudently managing our cost structure. While we are observing certain market fluctuations, our internal projections remain cautiously optimistic regarding our capacity to deliver sustainable returns. We are not providing granular forward-looking revenue guidance at this juncture, preferring to allow our ongoing investments in innovation to speak for themselves."
-Identify the overall sentiment of the earnings call, specifically noting any corporate jargon or evasive language used by management regarding future guidance.
-"""
-gemini_service = GeminiService()
-ai_explanation = gemini_service.generate_content(Prompt_Content)
-print(f"AI Explanation: {ai_explanation}\n")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+    if not GEMINI_API_KEY:
+        print("Error: GEMINI_API_KEY environment variable not set for testing.")
+    else:
+        print("Testing GeminiService with gemini-2.5-flash...")
+        gemini_analyzer = GeminiService(api_key=GEMINI_API_KEY)
+
+        test_transcript = """
+        CEO: "We've had a truly transformative quarter, navigating significant macroeconomic headwinds with unparalleled agility. Our strategic repositioning initiatives are yielding promising preliminary indicators, suggesting robust potential for enhanced shareholder value in the mid-to-long term."
+        Analyst: "Can you provide more specific guidance on revenue growth for the next fiscal year, given the recent market volatility?"
+        CFO: "As we've stated, our focus remains on operational efficiencies and prudently managing our cost structure. While we are observing certain market fluctuations, our internal projections remain cautiously optimistic regarding our capacity to deliver sustainable returns. We are not providing granular forward-looking revenue guidance at this juncture, preferring to allow our ongoing investments in innovation to speak for themselves."
+        """
+        test_user_prompt = """
+        Analyze the transcript. Provide the response as a JSON object with the following keys:
+        - "summary": A concise summary of the call (string).
+        - "overall_sentiment": "Positive", "Neutral", or "Negative" (string).
+        - "management_confidence_score": A score from 0 to 100 for management's confidence (integer).
+        - "evasiveness_score_q_a": A score from 0 to 100 for evasiveness in Q&A (integer).
+        - "key_topics": A list of 3-5 main topics discussed (array of strings).
+        - "red_flags": A list of any specific red flags or evasive phrases identified (array of strings).
+        """
+
+        try:
+            analysis_result = gemini_analyzer.analyze_transcript(test_transcript, test_user_prompt)
+            if analysis_result["success"]:
+                print(f"\n--- Gemini Analysis ({analysis_result['model_used']}) ---")
+                print(analysis_result["analysis"])
+            else:
+                print(f"\n--- Gemini Analysis Error ---")
+                print(analysis_result["error"])
+        except Exception as e:
+            print(f"\n--- Unexpected Error During Gemini Analysis ---")
+            print(f"An unexpected error occurred: {e}")

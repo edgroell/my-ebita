@@ -1,11 +1,7 @@
-import os
 import json
 from typing import Optional, Dict, Any
 
 import requests
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class NinjasService:
@@ -15,12 +11,17 @@ class NinjasService:
     and basic company profile information.
     """
 
-    def __init__(self):
-        """Initializes the NinjasService."""
-        self.api_key = os.getenv('API_NINJAS_KEY')
-        if not self.api_key:
-            raise ValueError("API_NINJAS_KEY not found!")
+    def __init__(self, api_key: str):
+        """
+        Initializes the NinjasService.
 
+        Args:
+            api_key (str): The API key for API-Ninjas.
+        """
+        if not api_key:
+            raise ValueError("API_NINJAS_KEY cannot be empty!")
+
+        self.api_key = api_key
         self.base_url = "https://api.api-ninjas.com/v1/"
         self.headers = {
             'X-Api-Key': self.api_key
@@ -55,10 +56,8 @@ class NinjasService:
                 print(f"No data found for the given parameters.")
                 return None
             elif isinstance(response_json, list) and response_json:
-                # If the API returns a list (e.g., /v1/logo), take the first relevant item
                 return response_json[0]
             elif isinstance(response_json, dict):
-                # If the API returns a single dictionary (e.g., /v1/earningstranscript)
                 return response_json
             else:
                 raise ValueError(
@@ -102,7 +101,7 @@ class NinjasService:
         """
         if not (1 <= quarter <= 4):
             raise ValueError("Quarter must be between 1 and 4.")
-        if not (1990 <= year <= 2100):
+        if not (1990 <= year <= 2100): # Realistic year range
             raise ValueError("Year seems a bit off. Please provide a realistic year.")
 
         params = {
@@ -117,8 +116,7 @@ class NinjasService:
             print(f"No transcript found for {ticker} Q{quarter} {year}. The silence is still deafening.")
             return None
 
-        # Extract the necessary fields, including the split
-        date = transcript_data.get('date')
+        date_str = transcript_data.get('date')
         transcript_text = transcript_data.get('transcript')
         transcript_split = transcript_data.get('transcript_split')
 
@@ -127,22 +125,22 @@ class NinjasService:
             return None
 
         return {
-            "date": date,
+            "date": date_str,
             "transcript": transcript_text,
             "transcript_split": transcript_split
         }
 
     def get_company_profile_basic(self, ticker: str) -> Optional[Dict[str, str]]:
         """
-        Fetches basic company profile information (name, symbol) using API Ninjas' Logo API.
+        Fetches basic company profile information (name, symbol, logo URL) using API Ninjas' Logo API.
 
         Args:
             ticker (str): The stock ticker symbol (e.g., "AAPL", "MSFT").
 
         Returns:
-            Optional[Dict[str, str]]: A dictionary containing 'name', 'symbol' (ticker) and 'logo',
+            Optional[Dict[str, str]]: A dictionary containing 'name', 'symbol' (ticker) and 'logo_url',
                                       or None if the company is not found.
-                                      Example: {"name": "Microsoft Corp", "ticker": "MSFT", "image": "..."}
+                                      Example: {"name": "Microsoft Corp", "symbol": "MSFT", "logo_url": "..."}
 
         Raises:
             ValueError, RequestException (propagated from _make_request)
@@ -162,7 +160,7 @@ class NinjasService:
         company_logo_url = company_data.get('image')
 
         if not company_name or not company_symbol or not company_logo_url:
-            print(f"Missing 'name', 'ticker', or 'logo' in basic profile for {ticker}. Incomplete data!")
+            print(f"Missing 'name', 'ticker', or 'image' in basic profile for {ticker}. Incomplete data!")
             return None
 
         return {
@@ -172,29 +170,46 @@ class NinjasService:
         }
 
 
-# TESTING
+# TESTING (Only runs when ninjas_service.py is executed directly)
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
 
-ninjas_service = NinjasService()
+    API_NINJAS_KEY = os.getenv('API_NINJAS_KEY')
 
-# --- Test Case 1: Fetch a known transcript (e.g., Microsoft Q2 2024) ---
-print("\n--- Testing fetching Microsoft Q2 2024 transcript (with split confirmation) ---")
-msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2024, quarter=2)
-if msft_transcript:
-    print(f"Date: {msft_transcript['date']}")
-    print(f"Transcript (first 500 chars):\n{msft_transcript['transcript'][:500]}...\n")
-    if msft_transcript['transcript_split']:
-        print(
-            f"Transcript Split Detected! First 3 segments:\n{json.dumps(msft_transcript['transcript_split'][:3], indent=2)}\n")
+    if not API_NINJAS_KEY:
+        print("Error: API_NINJAS_KEY environment variable not set for testing.")
     else:
-        print("Transcript Split NOT detected (unexpected, but possible for some data points).")
-else:
-    print("Failed to retrieve MSFT transcript.")
+        ninjas_service = NinjasService(api_key=API_NINJAS_KEY)
 
-# --- Test Case 2: Fetch basic company profile ---
-print("\n--- Testing fetching basic company profile for Google (GOOGL) ---")
-googl_profile = ninjas_service.get_company_profile_basic(ticker="GOOG")
-if googl_profile:
-    print(f"Company Name: {googl_profile.get('name')}")
-    print(f"Ticker Symbol: {googl_profile.get('symbol')}\n")
-else:
-    print("Failed to retrieve GOOGL company profile.")
+        # --- Test Case 1: Fetch a known transcript (e.g., Microsoft Q1 2025) ---
+        print("\n--- Testing fetching Microsoft Q1 2025 transcript (with split confirmation) ---")
+        try:
+            msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2025, quarter=1)
+            if msft_transcript:
+                print(f"Date: {msft_transcript['date']}")
+                print(f"Transcript (first 500 chars):\n{msft_transcript['transcript'][:500]}...\n")
+                if msft_transcript['transcript_split']:
+                    print(
+                        f"Transcript Split Detected! First 3 segments:\n{json.dumps(msft_transcript['transcript_split'][:3], indent=2)}\n")
+                else:
+                    print("Transcript Split NOT detected (unexpected, but possible for some data points).")
+            else:
+                print("Failed to retrieve MSFT transcript (no data returned).")
+        except (ValueError, requests.exceptions.RequestException, Exception) as e:
+            print(f"Error retrieving MSFT transcript: {e}")
+
+
+        # --- Test Case 2: Fetch basic company profile ---
+        print("\n--- Testing fetching basic company profile for Google (GOOGL) ---")
+        try:
+            googl_profile = ninjas_service.get_company_profile_basic(ticker="GOOG")
+            if googl_profile:
+                print(f"Company Name: {googl_profile.get('name')}")
+                print(f"Ticker Symbol: {googl_profile.get('symbol')}\n")
+                print(f"Logo URL: {googl_profile.get('logo_url')}\n")
+            else:
+                print("Failed to retrieve GOOGL company profile (no data returned).")
+        except (ValueError, requests.exceptions.RequestException, Exception) as e:
+            print(f"Error retrieving GOOGL company profile: {e}")

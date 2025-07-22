@@ -1,11 +1,7 @@
-import os
 import json
 
 from openai import OpenAI
 from openai import OpenAIError
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class ChatGPTService:
@@ -14,17 +10,18 @@ class ChatGPTService:
     Designed to provide analysis on earnings call transcripts.
     """
 
-    def __init__(self, model_name: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str,
+                 model_name: str = "gpt-4o-mini"):
         """
         Initializes the ChatGPTService with an API key and specified model.
 
         Args:
-            api_key (str): Your OpenAI API key.
+            api_key (str): The API key to authenticate with the OpenAI API.
             model_name (str): The name of the ChatGPT model to use (e.g., "gpt-4o-mini", "gpt-4.1-mini").
         """
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OPENAI_API_KEY not found!")
+        if not api_key:
+            raise ValueError("OpenAI API key cannot be empty.")
+        self.api_key = api_key
         self.client = OpenAI(api_key=self.api_key)
         self.model_name = model_name
         print(f"ChatGPTService initialized with model: {self.model_name}")
@@ -43,7 +40,7 @@ class ChatGPTService:
 
         Returns:
             dict: A dictionary containing the AI's analysis, or an error message.
-                  Example: {"analysis": "...", "model_used": "gpt-4o-mini", "success": True}
+                  Example: {"analysis": {...}, "model_used": "gpt-4o-mini", "success": True}
         """
         if not transcript_text:
             return {"error": "Transcript text cannot be empty for analysis.", "success": False}
@@ -69,20 +66,13 @@ class ChatGPTService:
 
             analysis_content = response.choices[0].message.content
 
-            try:
-                parsed_content = json.loads(analysis_content)
-                return {"analysis": parsed_content, "model_used": self.model_name, "success": True}
-            except json.JSONDecodeError:
-                return {"analysis": analysis_content, "model_used": self.model_name, "success": True,
-                        "warning": "Expected JSON but got plain text."}
+            parsed_content = json.loads(analysis_content)
+            return {"analysis": parsed_content, "model_used": self.model_name, "success": True}
 
-            # if type is text
-            # return {
-            #     "analysis": analysis_content,
-            #     "model_used": self.model_name,
-            #     "success": True
-            # }
-
+        except json.JSONDecodeError as e:
+            print(f"JSON Decode Error (critical): {e}. Raw response: {analysis_content}")
+            return {"error": f"Failed to parse AI response as JSON (critical): {e}. Raw: {analysis_content[:200]}...",
+                    "success": False}
         except OpenAIError as e:
             print(f"OpenAI API Error: {e}")
             return {"error": f"Failed to get analysis from ChatGPT: {e}", "success": False}
@@ -91,25 +81,42 @@ class ChatGPTService:
             return {"error": f"An unexpected error occurred: {e}", "success": False}
 
 
-# TESTING
+# TESTING (Only runs when chatgpt_service.py is executed directly)
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
 
-print("Testing ChatGPTService with gpt-4.1-mini...")
-chatgpt_analyzer = ChatGPTService(model_name="gpt-4.1-mini")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-test_transcript = """
-CEO: "We've had a truly transformative quarter, navigating significant macroeconomic headwinds with unparalleled agility. Our strategic repositioning initiatives are yielding promising preliminary indicators, suggesting robust potential for enhanced shareholder value in the mid-to-long term."
-Analyst: "Can you provide more specific guidance on revenue growth for the next fiscal year, given the recent market volatility?"
-CFO: "As we've stated, our focus remains on operational efficiencies and prudently managing our cost structure. While we are observing certain market fluctuations, our internal projections remain cautiously optimistic regarding our capacity to deliver sustainable returns. We are not providing granular forward-looking revenue guidance at this juncture, preferring to allow our ongoing investments in innovation to speak for themselves."
-"""
-test_prompt = "Identify the overall sentiment of the earnings call, specifically noting any corporate jargon or evasive language used by management regarding future guidance."
+    if not OPENAI_API_KEY:
+        print("Error: OPENAI_API_KEY environment variable not set for testing.")
+        print("Please set it before running the example: export OPENAI_API_KEY='your_key_here'")
+    else:
+        print("Testing ChatGPTService with gpt-4o-mini...")
+        chatgpt_analyzer = ChatGPTService(api_key=OPENAI_API_KEY, model_name="gpt-4o-mini")
 
-analysis_result = chatgpt_analyzer.analyze_transcript(test_transcript, test_prompt)
+        test_transcript = """
+        CEO: "We've had a truly transformative quarter, navigating significant macroeconomic headwinds with unparalleled agility. Our strategic repositioning initiatives are yielding promising preliminary indicators, suggesting robust potential for enhanced shareholder value in the mid-to-long term."
+        Analyst: "Can you provide more specific guidance on revenue growth for the next fiscal year, given the recent market volatility?"
+        CFO: "As we've stated, our focus remains on operational efficiencies and prudently managing our cost structure. While we are observing certain market fluctuations, our internal projections remain cautiously optimistic regarding our capacity to deliver sustainable returns. We are not providing granular forward-looking revenue guidance at this juncture, preferring to allow our ongoing investments in innovation to speak for themselves."
+        """
 
-if analysis_result["success"]:
-    print("\n--- ChatGPT Analysis (gpt-4.1-mini) ---")
-    for k, v in analysis_result["analysis"].items():
-        print(f"{k}: {v}")
+        test_prompt = """
+        Analyze the transcript. Provide the response as a JSON object with the following keys:
+        - "summary": A concise summary of the call (string).
+        - "overall_sentiment": "Positive", "Neutral", or "Negative" (string).
+        - "management_confidence_score": A score from 0 to 100 for management's confidence (integer).
+        - "evasiveness_score_q_a": A score from 0 to 100 for evasiveness in Q&A (integer).
+        - "key_topics": A list of 3-5 main topics discussed (array of strings).
+        - "red_flags": A list of any specific red flags or evasive phrases identified (array of strings).
+        """
 
-else:
-    print("\n--- ChatGPT Analysis Error ---")
-    print(analysis_result["error"])
+        analysis_result = chatgpt_analyzer.analyze_transcript(test_transcript, test_prompt)
+
+        if analysis_result["success"]:
+            print(f"\n--- ChatGPT Analysis ({analysis_result['model_used']}) ---")
+            print(json.dumps(analysis_result["analysis"], indent=2))
+        else:
+            print("\n--- ChatGPT Analysis Error ---")
+            print(analysis_result["error"])
