@@ -1,5 +1,4 @@
 import json
-
 import requests
 
 
@@ -32,6 +31,7 @@ class GeminiService:
     def _make_request(self, model_name: str, contents: list) -> dict:
         """
         Internal method to construct and send the API request.
+        This method now includes the 'generationConfig' for JSON output.
 
         Args:
             model_name (str): The specific Gemini model to target.
@@ -45,7 +45,12 @@ class GeminiService:
             ValueError: For API errors (non-2xx status codes) or unexpected response format.
         """
         url = f"{self.base_url}{model_name}:generateContent"
-        payload = {"contents": contents}
+        payload = {
+            "contents": contents,
+            "generationConfig": {
+                "responseMimeType": "application/json"
+            }
+        }
 
         try:
             response = requests.post(url, headers=self.headers, json=payload, timeout=60)
@@ -82,42 +87,44 @@ class GeminiService:
 
         Returns:
             dict: A dictionary containing the AI's analysis, or an error message.
-                  Example: {"analysis": "...", "model_used": "gemini-2.5-flash", "success": True}
+                  Example: {"analysis": {...}, "model_used": "gemini-2.5-flash", "success": True}
+                          Note: 'analysis' key now holds a Python dictionary.
         """
         model_to_use = model_name if model_name else self.default_model
 
-        # Combine transcript and user prompt into a single, comprehensive prompt
         full_prompt = (
             "You are a financial analyst AI specializing in dissecting earnings call transcripts. "
             "Your goal is to provide concise, factual, and insightful analysis, identifying sentiment, "
-            "key topics, and any signs of management spin or evasiveness. Focus on the financial implications.\n\n"
+            "key topics, and any signs of management spin or evasiveness. Focus on the financial implications. "
             f"Here is an earnings call transcript:\n\n---\n{transcript_text}\n---\n\n"
             f"Based on the transcript, {user_prompt}"
         )
 
         try:
-            generated_text = self.generate_content(full_prompt, model_name=model_to_use)
+            parsed_analysis = self.generate_content(full_prompt, model_name=model_to_use)
             return {
-                "analysis": generated_text,
+                "analysis": parsed_analysis,
                 "model_used": model_to_use,
                 "success": True
             }
         except (ValueError, requests.exceptions.RequestException, Exception) as e:
+            print(f"Error in analyze_transcript: {e}")
             return {"error": f"Failed to get analysis from Gemini: {e}", "success": False}
 
-    def generate_content(self, prompt_text: str, model_name: str = None) -> str:
+    def generate_content(self, prompt_text: str, model_name: str = None) -> dict:
         """
         Generates content from a text prompt using the Gemini API.
+        The API is now configured to return pure JSON, so no regex extraction needed.
 
         Args:
             prompt_text (str): The text input for the AI.
             model_name (str, optional): Override the default model for this specific call.
 
         Returns:
-            str: The generated text content from the AI.
+            dict: The parsed JSON content from the AI.
 
         Raises:
-            ValueError: If the API response does not contain expected text.
+            ValueError: If the API response does not contain expected JSON.
             (Other exceptions propagated from _make_request)
         """
         model_to_use = model_name if model_name else self.default_model
@@ -129,15 +136,19 @@ class GeminiService:
         response_data = self._make_request(model_to_use, contents)
 
         try:
-            generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
+            raw_generated_text = response_data['candidates'][0]['content']['parts'][0]['text']
 
-            return generated_text
+            parsed_json = json.loads(raw_generated_text)
+            return parsed_json
 
         except (KeyError, IndexError) as e:
             raise ValueError(
                 f"Unexpected response format from Gemini API. "
                 f"Could not extract text. Error: {e}. Full response: {json.dumps(response_data, indent=2)}"
             )
+        except json.JSONDecodeError as e:
+            print(f"DEBUG: JSONDecodeError: Failed to decode what was expected to be pure JSON: '{raw_generated_text[:200]}...'")
+            raise ValueError(f"Failed to decode JSON from Gemini response: {e}. Raw content: {raw_generated_text[:500]}")
 
 
 # TESTING (Only runs when gemini_service.py is executed directly)
@@ -173,7 +184,7 @@ if __name__ == "__main__":
             analysis_result = gemini_analyzer.analyze_transcript(test_transcript, test_user_prompt)
             if analysis_result["success"]:
                 print(f"\n--- Gemini Analysis ({analysis_result['model_used']}) ---")
-                print(analysis_result["analysis"])
+                print(json.dumps(analysis_result["analysis"], indent=2))
             else:
                 print(f"\n--- Gemini Analysis Error ---")
                 print(analysis_result["error"])

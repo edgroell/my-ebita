@@ -26,7 +26,7 @@ class ChatGPTService:
         self.model_name = model_name
         print(f"ChatGPTService initialized with model: {self.model_name}")
 
-    def analyze_transcript(self, transcript_text: str, user_prompt: str, max_tokens: int = 1000) -> dict:
+    def analyze_transcript(self, transcript_text: str, user_prompt: str, max_tokens: int = 2500) -> dict:
         """
         Sends an earnings call transcript and a user-defined prompt to the ChatGPT model
         for analysis.
@@ -44,8 +44,6 @@ class ChatGPTService:
         """
         if not transcript_text:
             return {"error": "Transcript text cannot be empty for analysis.", "success": False}
-        if not user_prompt:
-            return {"error": "User prompt cannot be empty for analysis.", "success": False}
 
         messages = [
             {"role": "system",
