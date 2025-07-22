@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - My EBITA{% endblock title %}
+
+{% block content %}
+<div class="py-6 px-4 sm:px-6 lg:px-8">
+    <h1 class="text-4xl font-extrabold text-gray-900 mb-8 text-center">
+        Welcome, <span class="text-indigo-600">{{ current_user.username }}</span>!
+    </h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+        <div class="flex flex-col space-y-8">
+            <div class="bg-white rounded-lg shadow-xl p-6">
+                <h2 class="text-2xl font-semibold text-gray-900 mb-4">Acquire New Transcript</h2>
+                <p class="text-gray-700 mb-4">Get the Earnings Call Transcript you want to analyze.</p>
+                <form action="{{ url_for('acquire_transcript') }}" method="POST" class="space-y-4">
+                    <div>
+                        <label for="ticker" class="sr-only">Ticker Symbol</label>
+                        <input type="text" id="ticker" name="ticker" placeholder="Ticker (e.g., AAPL)" required
+                               class="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="year" class="sr-only">Fiscal Year</label>
+                            <input type="number" id="year" name="year" placeholder="Year (e.g., 2024)" required
+                                   class="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                        </div>
+                        <div>
+                            <label for="quarter" class="sr-only">Fiscal Quarter</label>
+                            <input type="number" id="quarter" name="quarter" placeholder="Quarter (1-4)" min="1" max="4" required
+                                   class="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                        </div>
+                    </div>
+                    <div>
+                        <button type="submit"
+                                class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 ease-in-out">
+                            Acquire Transcript
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="flex flex-col space-y-8">
+            <div class="bg-white rounded-lg shadow-xl p-6 h-full">
+                <h2 class="text-2xl font-semibold text-gray-900 mb-4">Available Transcripts</h2>
+                <p class="text-gray-700 mb-4">Use the Transcript ID to run an analysis.</p>
+
+                {% set all_transcripts = data_manager.get_all_transcripts() %}
+                {% if all_transcripts %}
+                    <ul class="divide-y divide-gray-200">
+                        {% for transcript in all_transcripts %}
+                            <li class="py-4 flex justify-between items-center">
+                                <div class="flex-1">
+                                    <h3 class="text-lg font-medium text-gray-900">
+                                        {{ transcript.company.company_name }} ({{ transcript.ticker_symbol }})
+                                        - Q{{ transcript.fiscal_quarter }} {{ transcript.fiscal_year }}
+                                    </h3>
+                                    <p class="text-sm text-gray-500">
+                                        Transcript ID: <span class="font-semibold">{{ transcript.transcript_id }}</span>
+                                    </p>
+                                </div>
+                                <div class="flex space-x-2">
+                                    <a href="{{ url_for('get_transcript', transcript_id=transcript.transcript_id) }}" target="_blank"
+                                        class="text-indigo-600 hover:text-indigo-800 text-sm font-medium py-1 px-3 rounded-md border border-indigo-200">
+                                        View API
+                                    </a>
+                                    <form action="{{ url_for('delete_transcript', transcript_id=transcript.transcript_id) }}" method="POST"
+                                        onsubmit="return confirm('Are you sure you want to delete this transcript and all associated reports?');">
+                                        <button type="submit" class="text-red-600 hover:text-white hover:bg-red-600 text-sm font-medium py-1 px-3 rounded-md border border-red-200 transition-colors duration-200">
+                                            Delete
+                                        </button>
+                                    </form>
+                                </div>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-gray-600">No transcripts found. Acquire one to get started!</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-12 border-t-2 border-gray-200">
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div class="flex flex-col space-y-8">
+            <div class="bg-white rounded-lg shadow-xl p-6">
+                <h2 class="text-2xl font-semibold text-gray-900 mb-4">Analyze Transcript</h2>
+                <p class="text-gray-700 mb-4">Select a transcript to run dual AI analysis.</p>
+                <form id="analysis-form" action="{{ url_for('request_analysis') }}" method="POST" class="space-y-4">
+                    <div>
+                        <label for="transcript_id_analyze" class="block text-sm font-medium text-gray-700">Transcript ID</label>
+                        <input type="number" id="transcript_id_analyze" name="transcript_id" placeholder="Transcript ID to analyze" required
+                               class="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="analysis_prompt" class="block text-sm font-medium text-gray-700">Analysis Prompt (Optional)</label>
+                        <textarea id="analysis_prompt" name="analysis_prompt" rows="3"
+                                  class="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                  placeholder="Optional: Custom analysis prompt"></textarea>
+                    </div>
+                    <div>
+                        <button id="analysis-button" type="submit"
+                                class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-300 ease-in-out">
+                            <span id="button-text">Run Dual AI Analysis</span>
+                            <svg id="loading-spinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="flex flex-col space-y-8">
+            <div class="bg-white rounded-lg shadow-xl p-6 h-full">
+                <h2 class="text-2xl font-semibold text-gray-900 mb-4">Your Analysis Reports</h2>
+                <p class="text-gray-700 mb-4">Click on a report to view the full details.</p>
+
+                {% if current_user.is_authenticated %}
+                    {% set reports = data_manager.get_reports_for_user(current_user.user_id) %}
+                    {% if reports %}
+                        <ul class="divide-y divide-gray-200">
+                            {% for report in reports %}
+                                <li class="py-4 flex justify-between items-center">
+                                    <a href="{{ url_for('view_analysis_report', report_id=report.report_id) }}" class="flex-1 block hover:bg-gray-50 transition duration-150 rounded-lg -m-2 p-2">
+                                        <div class="flex items-center">
+                                            <div class="flex-1">
+                                                <h3 class="text-lg font-medium text-indigo-600">
+                                                    {{ report.transcript.company.company_name }} ({{ report.transcript.company.ticker_symbol }})
+                                                    - Q{{ report.transcript.fiscal_quarter }} {{ report.transcript.fiscal_year }}
+                                                </h3>
+                                                <p class="text-sm text-gray-500">
+                                                    Analyzed on: {{ report.analysis_date.strftime('%Y-%m-%d %H:%M') }}
+                                                </p>
+                                            </div>
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400 ml-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                                            </svg>
+                                        </div>
+                                    </a>
+                                    <form action="{{ url_for('delete_analysis_report', report_id=report.report_id) }}" method="POST"
+                                        onsubmit="return confirm('Are you sure you want to delete this analysis report?');">
+                                        <button type="submit" class="text-red-600 hover:text-white hover:bg-red-600 text-sm font-medium py-1 px-3 rounded-md border border-red-200 transition-colors duration-200 ml-4">
+                                            Delete
+                                        </button>
+                                    </form>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-gray-600">No analysis reports generated yet. Acquire a transcript and run an analysis!</p>
+                    {% endif %}
+                {% else %}
+                    <p class="text-gray-600">Please log in to view your analysis reports.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('analysis-form').addEventListener('submit', function() {
+        const button = document.getElementById('analysis-button');
+        const buttonText = document.getElementById('button-text');
+        const spinner = document.getElementById('loading-spinner');
+
+        // Disable the button to prevent multiple submissions
+        button.disabled = true;
+        button.classList.add('cursor-not-allowed', 'opacity-50');
+
+        // Hide button text and show the spinner
+        buttonText.classList.add('hidden');
+        spinner.classList.remove('hidden');
+    });
+</script>
+{% endblock content %}
