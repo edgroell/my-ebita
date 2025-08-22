@@ -1,7 +1,4 @@
-"""
-Module containing all data models of the app.
-Designed for SQLite using Flask-SQLAlchemy.
-"""
+# Data models for the application
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import UniqueConstraint
@@ -25,22 +22,22 @@ class User(db.Model, UserMixin):
     created_at = db.Column(db.DateTime, nullable=False, default=get_current_datetime)
     updated_at = db.Column(db.DateTime, default=get_current_datetime, onupdate=get_current_datetime)
     last_login_at = db.Column(db.DateTime)
-    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    active_status = db.Column(db.Boolean, nullable=False, default=True)
 
     def get_id(self):
         return str(self.user_id)
 
-    def set_password(self, password):
+    def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
 
-    def check_password(self, password):
+    def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
 
     # Relationships
     analysis_reports = db.relationship('AnalysisReport', backref='user', lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<User {self.username} (Active: {self.is_active})>"
+        return f"<User {self.username} (Active: {self.active_status})>"
 
 class Company(db.Model):
     """Stores static metadata about companies whose earnings calls will be analyzed."""
@@ -85,7 +82,7 @@ class EarningsCallTranscript(db.Model):
 class AnalysisReport(db.Model):
     """
     Stores the AI's generated "between-the-lines" reports for each transcript,
-    including output from both Gemini and ChatGPT for direct comparison.
+    including output from Gemini, ChatGPT and Groq for direct comparison.
     """
     __tablename__ = 'analysis_reports'
     report_id = db.Column(db.Integer, primary_key=True)
@@ -112,6 +109,11 @@ class AnalysisReport(db.Model):
     gemini_red_flags_identified = db.Column(db.JSON)
     gemini_raw_response_json = db.Column(db.JSON)
 
+    # Gemini timing
+    gemini_request_ms = db.Column(db.Float)
+    gemini_parse_ms = db.Column(db.Float)
+    gemini_total_ms = db.Column(db.Float)
+
     # --- ChatGPT Analysis Fields ---
     chatgpt_summary = db.Column(db.Text)
     chatgpt_overall_sentiment = db.Column(db.String(50))
@@ -121,6 +123,26 @@ class AnalysisReport(db.Model):
     chatgpt_key_topics_discussed = db.Column(db.JSON)
     chatgpt_red_flags_identified = db.Column(db.JSON)
     chatgpt_raw_response_json = db.Column(db.JSON)
+
+    # ChatGPT timing
+    chatgpt_request_ms = db.Column(db.Float)
+    chatgpt_parse_ms = db.Column(db.Float)
+    chatgpt_total_ms = db.Column(db.Float)
+
+    # --- Groq Analysis Fields (new) ---
+    groq_summary = db.Column(db.Text)
+    groq_overall_sentiment = db.Column(db.String(50))
+    groq_sentiment_scores_by_segment = db.Column(db.JSON)
+    groq_management_confidence_score = db.Column(db.Float)
+    groq_evasiveness_score_q_a = db.Column(db.Float)
+    groq_key_topics_discussed = db.Column(db.JSON)
+    groq_red_flags_identified = db.Column(db.JSON)
+    groq_raw_response_json = db.Column(db.JSON)
+
+    # Groq timing
+    groq_request_ms = db.Column(db.Float)
+    groq_parse_ms = db.Column(db.Float)
+    groq_total_ms = db.Column(db.Float)
 
     comparison_notes = db.Column(db.Text)
 

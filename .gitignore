@@ -1,4 +1,7 @@
+# Ignore Python cache files
+
 .idea/
 .env
 data/__pycache__/
 services/__pycache__/
+typings/
