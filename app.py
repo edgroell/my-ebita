@@ -1,9 +1,9 @@
-# TODO List of Transcripts (in app.py), Comparison Notes, remove TESTING blocks
+# TODO remove TESTING blocks?
 """
 My EBITA - An AI Financial Sidekick
 *EBITA: Earnings Beat Indicator & Text Analyzer
 by Ed Groell
-Latest: 22-JUL-2025
+Latest: 22-AUG-2025
 """
 
 import os
@@ -18,15 +18,25 @@ from data.data_manager import DataManager
 # Importing AI services
 from services.gemini_service import GeminiService
 from services.chatgpt_service import ChatGPTService
-# Importing API Ninjas Service for data acquisition
 from services.ninjas_service import NinjasService
+from services.groq_service import GroqService
+from services.analysis_result import AnalysisResult
+import logging
 from dotenv import load_dotenv
-
-# --- Flask App Initialization ---
-app = Flask(__name__)
 
 # --- Load environment variables ---
 load_dotenv()
+
+# Default prompt parameters
+DEFAULT_ANALYSIS_PROMPT = "return an analysis as per the following requirements"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
+DEFAULT_CHATGPT_MODEL = "gpt-4.1-mini"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
+DEFAULT_MAX_TOKENS = 2500
+DEFAULT_TEMPERATURE = 0.8
+
+# --- Flask App Initialization ---
+app = Flask(__name__)
 
 # --- Flask Configuration ---
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
@@ -48,20 +58,27 @@ data_manager = DataManager(db) # Initialize DataManager here
 # Get API keys from environment variables
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") # Assuming GOOGLE_API_KEY for Gemini
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 API_NINJAS_KEY = os.environ.get("API_NINJAS_KEY")
 
 # Initialize AI services (handle cases where API keys might be missing)
 gemini_service = None
 if GEMINI_API_KEY:
-    gemini_service = GeminiService(api_key=GEMINI_API_KEY)
+    gemini_service = GeminiService(api_key=GEMINI_API_KEY, default_model=DEFAULT_GEMINI_MODEL)
 else:
     print("Warning: GOOGLE_API_KEY not set. GeminiService will not be available.")
 
 chatgpt_service = None
 if OPENAI_API_KEY:
-    chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY)
+    chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY, model_name=DEFAULT_CHATGPT_MODEL)
 else:
     print("Warning: OPENAI_API_KEY not set. ChatGPTService will not be available.")
+
+groq_service = None
+if GROQ_API_KEY:
+    groq_service = GroqService(api_key=GROQ_API_KEY, default_model=DEFAULT_GROQ_MODEL)
+else:
+    print("Warning: GROQ_API_KEY not set. GroqService will not be available.")
 
 ninjas_service = None
 if API_NINJAS_KEY:
@@ -87,6 +104,33 @@ def inject_global_variables():
     """
     return dict(datetime=datetime, current_user=current_user, data_manager=data_manager)
 
+
+def _first_of(d: dict, *keys, default=None):
+    for k in keys:
+        if k in d and d[k] is not None:
+            return d[k]
+    return default
+
+def _normalize_service_result(res):
+    if isinstance(res, dict):
+        return {
+            "success": bool(res.get("success", False)),
+            "analysis": res.get("analysis") or res.get("parsed") or res.get("result") or res.get("content") or None,
+            "error": res.get("error"),
+            "request_ms": res.get("request_ms") or res.get("api_elapsed_ms") or res.get("api_elapsed") or res.get("requestElapsedMs"),
+            "parse_ms": res.get("parse_ms") or res.get("parse_elapsed_ms") or res.get("parseElapsedMs"),
+            "total_ms": res.get("total_ms") or res.get("totalElapsedMs"),
+        }
+    if isinstance(res, AnalysisResult):
+        return {
+            "success": bool(getattr(res, "success", False)),
+            "analysis": res.to_dict() if getattr(res, "success", False) else None,
+            "error": getattr(res, "error", None),
+            "request_ms": getattr(res, "request_ms", None),
+            "parse_ms": getattr(res, "parse_ms", None),
+            "total_ms": getattr(res, "total_ms", None),
+        }
+    return {"success": False, "analysis": None, "error": f"Unexpected result type: {type(res)}", "request_ms": None, "parse_ms": None, "total_ms": None}
 
 # -----------------------------------------------------
 # Status
@@ -443,25 +487,18 @@ def acquire_transcript():
 @login_required
 def request_analysis():
     """
-    API endpoint to request a new dual AI analysis for an earnings call transcript.
-    This performs analysis using both Gemini and ChatGPT.
+    API endpoint to request a new AI analysis for an earnings call transcript.
+    This performs analysis using Gemini, ChatGPT, and Groq.
     """
     transcript_id = request.form.get('transcript_id', type=int)
-    # The default prompt has been moved to be a variable for easier management
-    default_prompt = """Analyze the transcript. Provide the response as a JSON object with the following keys:
-- "summary": A concise summary of the call (string).
-- "overall_sentiment": "Positive", "Neutral", or "Negative" (string).
-- "management_confidence_score": A score from 0 to 100 for management's confidence (integer).
-- "evasiveness_score_q_a": A score from 0 to 100 for evasiveness in Q&A (integer).
-- "key_topics": A list of 3-5 main topics discussed (array of strings).
-- "red_flags": A list of any specific red flags or evasive phrases identified (array of strings).
-"""
-    # Use user prompt if provided, otherwise use the default
-    analysis_prompt = request.form.get('analysis_prompt', default_prompt).strip()
+    # Allow an optional custom prompt from the user. If none is provided,
+    # fall back to the app-level default so services receive a prompt.
+    analysis_prompt = request.form.get('analysis_prompt')
+    if isinstance(analysis_prompt, str):
+        analysis_prompt = analysis_prompt.strip()
+    # If user provided nothing, use app-level default
     if not analysis_prompt:
-        analysis_prompt = default_prompt
-
-    comparison_notes = request.form.get('comparison_notes')
+        analysis_prompt = DEFAULT_ANALYSIS_PROMPT
 
     if not transcript_id:
         flash("Transcript ID is required to perform analysis.", 'danger')
@@ -474,11 +511,13 @@ def request_analysis():
 
     gemini_analysis_result = {"success": False, "error": "Gemini Service not available."}
     chatgpt_analysis_result = {"success": False, "error": "ChatGPT Service not available."}
+    groq_analysis_result = {"success": False, "error": "Groq Service not available."}
 
     # --- Call Gemini Service ---
     if gemini_service:
         try:
-            gemini_analysis_result = gemini_service.analyze_transcript(transcript.raw_text, analysis_prompt)
+            raw_gemini = gemini_service.analyze_transcript(transcript.raw_text, analysis_prompt, temperature=DEFAULT_TEMPERATURE)
+            gemini_analysis_result = _normalize_service_result(raw_gemini)
             print(f"Gemini Analysis Success: {gemini_analysis_result.get('success')}")
         except Exception as e:
             print(f"Error during Gemini analysis: {e}")
@@ -489,7 +528,8 @@ def request_analysis():
     # --- Call ChatGPT Service ---
     if chatgpt_service:
         try:
-            chatgpt_analysis_result = chatgpt_service.analyze_transcript(transcript.raw_text, analysis_prompt)
+            raw_chatgpt = chatgpt_service.analyze_transcript(transcript.raw_text, analysis_prompt, max_tokens=DEFAULT_MAX_TOKENS, temperature=DEFAULT_TEMPERATURE)
+            chatgpt_analysis_result = _normalize_service_result(raw_chatgpt)
             print(f"ChatGPT Analysis Success: {chatgpt_analysis_result.get('success')}")
         except Exception as e:
             print(f"Error during ChatGPT analysis: {e}")
@@ -497,84 +537,144 @@ def request_analysis():
     else:
         print("ChatGPTService not initialized.")
 
+    # --- Call Groq Service ---
+    if groq_service:
+        try:
+            raw_groq = groq_service.analyze_transcript(transcript.raw_text, analysis_prompt, temperature=DEFAULT_TEMPERATURE)
+            groq_analysis_result = _normalize_service_result(raw_groq)
+            print(f"Groq Analysis Success: {groq_analysis_result.get('success')}")
+        except Exception as e:
+            print(f"Error during Groq analysis: {e}")
+            groq_analysis_result = {"success": False, "error": f"Groq Service Error: {e}"}
+    else:
+        print("GroqService not initialized.")
+
     # Preparing data for DataManager based on AI results
+    # Extract concise rationale + timings and include them in DB payload
     gemini_data_for_db = {}
+    gemini_req_ms = gemini_analysis_result.get("request_ms")
+    gemini_parse_ms = gemini_analysis_result.get("parse_ms")
+    gemini_total_ms = gemini_analysis_result.get("total_ms")
     if gemini_analysis_result and gemini_analysis_result.get("success"):
-        parsed_gemini_output = gemini_analysis_result["analysis"]
+        parsed_gemini_output = gemini_analysis_result["analysis"] or {}
         gemini_data_for_db = {
             "gemini_summary": parsed_gemini_output.get("summary", ""),
+            "gemini_concise_rationale": _first_of(parsed_gemini_output, "concise_rationale", "conciseRationale", "rationale"),
             "gemini_overall_sentiment": parsed_gemini_output.get("overall_sentiment", "Neutral"),
             "gemini_sentiment_scores_by_segment": parsed_gemini_output.get("sentiment_scores_by_segment"),
             "gemini_management_confidence_score": parsed_gemini_output.get("management_confidence_score"),
             "gemini_evasiveness_score_q_a": parsed_gemini_output.get("evasiveness_score_q_a"),
             "gemini_key_topics_discussed": parsed_gemini_output.get("key_topics"),
             "gemini_red_flags_identified": parsed_gemini_output.get("red_flags"),
-            "gemini_raw_response_json": parsed_gemini_output
+            "gemini_raw_response_json": parsed_gemini_output,
+            "gemini_request_ms": gemini_req_ms,
+            "gemini_parse_ms": gemini_parse_ms,
+            "gemini_total_ms": gemini_total_ms,
         }
     else:
-        # Ensure that values are JSON serializable if AI failed, e.g., None instead of complex objects
         gemini_data_for_db = {
             "gemini_summary": f"Gemini analysis failed: {gemini_analysis_result.get('error', 'N/A')}",
+            "gemini_concise_rationale": None,
             "gemini_overall_sentiment": "Error",
-            "gemini_sentiment_scores_by_segment": None, # Set to None if not available
+            "gemini_sentiment_scores_by_segment": None,
             "gemini_management_confidence_score": None,
             "gemini_evasiveness_score_q_a": None,
             "gemini_key_topics_discussed": None,
             "gemini_red_flags_identified": None,
-            "gemini_raw_response_json": {"error": gemini_analysis_result.get('error', 'N/A')}
+            "gemini_raw_response_json": {"error": gemini_analysis_result.get('error', 'N/A')},
+            "gemini_request_ms": gemini_req_ms,
+            "gemini_parse_ms": gemini_parse_ms,
+            "gemini_total_ms": gemini_total_ms,
         }
 
     chatgpt_data_for_db = {}
+    chatgpt_req_ms = chatgpt_analysis_result.get("request_ms")
+    chatgpt_parse_ms = chatgpt_analysis_result.get("parse_ms")
+    chatgpt_total_ms = chatgpt_analysis_result.get("total_ms")
     if chatgpt_analysis_result and chatgpt_analysis_result.get("success"):
-        parsed_chatgpt_output = chatgpt_analysis_result["analysis"]
+        parsed_chatgpt_output = chatgpt_analysis_result["analysis"] or {}
         chatgpt_data_for_db = {
             "chatgpt_summary": parsed_chatgpt_output.get("summary", ""),
+            "chatgpt_concise_rationale": _first_of(parsed_chatgpt_output, "concise_rationale", "conciseRationale", "rationale"),
             "chatgpt_overall_sentiment": parsed_chatgpt_output.get("overall_sentiment", "Neutral"),
             "chatgpt_sentiment_scores_by_segment": parsed_chatgpt_output.get("sentiment_scores_by_segment"),
             "chatgpt_management_confidence_score": parsed_chatgpt_output.get("management_confidence_score"),
             "chatgpt_evasiveness_score_q_a": parsed_chatgpt_output.get("evasiveness_score_q_a"),
             "chatgpt_key_topics_discussed": parsed_chatgpt_output.get("key_topics"),
             "chatgpt_red_flags_identified": parsed_chatgpt_output.get("red_flags"),
-            "chatgpt_raw_response_json": parsed_chatgpt_output
+            "chatgpt_raw_response_json": parsed_chatgpt_output,
+            "chatgpt_request_ms": chatgpt_req_ms,
+            "chatgpt_parse_ms": chatgpt_parse_ms,
+            "chatgpt_total_ms": chatgpt_total_ms,
         }
     else:
-        # Ensure that values are JSON serializable if AI failed, e.g., None instead of complex objects
         chatgpt_data_for_db = {
             "chatgpt_summary": f"ChatGPT analysis failed: {chatgpt_analysis_result.get('error', 'N/A')}",
+            "chatgpt_concise_rationale": None,
             "chatgpt_overall_sentiment": "Error",
             "chatgpt_sentiment_scores_by_segment": None,
             "chatgpt_management_confidence_score": None,
             "chatgpt_evasiveness_score_q_a": None,
             "chatgpt_key_topics_discussed": None,
             "chatgpt_red_flags_identified": None,
-            "chatgpt_raw_response_json": {"error": chatgpt_analysis_result.get('error', 'N/A')}
+            "chatgpt_raw_response_json": {"error": chatgpt_analysis_result.get('error', 'N/A')},
+            "chatgpt_request_ms": chatgpt_req_ms,
+            "chatgpt_parse_ms": chatgpt_parse_ms,
+            "chatgpt_total_ms": chatgpt_total_ms,
         }
 
-    # Check for existing report to prevent UniqueConstraint violation
-    # The UniqueConstraint includes 'analysis_date', so multiple reports for the same
-    # user/transcript are allowed if they occur at different times.
-    # However, if you want only ONE report per user/transcript, you need to
-    # query for existence without the analysis_date, or update the existing one.
-    # For now, we'll allow multiple but ensure the `create_analysis_report` handles it.
+    # --- Groq DB payload ---
+    groq_data_for_db = {}
+    groq_req_ms = groq_analysis_result.get("request_ms")
+    groq_parse_ms = groq_analysis_result.get("parse_ms")
+    groq_total_ms = groq_analysis_result.get("total_ms")
+    if groq_analysis_result and groq_analysis_result.get("success"):
+        parsed_groq_output = groq_analysis_result["analysis"] or {}
+        groq_data_for_db = {
+            "groq_summary": parsed_groq_output.get("summary", ""),
+            "groq_concise_rationale": _first_of(parsed_groq_output, "concise_rationale", "conciseRationale", "rationale"),
+            "groq_overall_sentiment": parsed_groq_output.get("overall_sentiment", "Neutral"),
+            "groq_sentiment_scores_by_segment": parsed_groq_output.get("sentiment_scores_by_segment"),
+            "groq_management_confidence_score": parsed_groq_output.get("management_confidence_score"),
+            "groq_evasiveness_score_q_a": parsed_groq_output.get("evasiveness_score_q_a"),
+            "groq_key_topics_discussed": parsed_groq_output.get("key_topics"),
+            "groq_red_flags_identified": parsed_groq_output.get("red_flags"),
+            "groq_raw_response_json": parsed_groq_output,
+            "groq_request_ms": groq_req_ms,
+            "groq_parse_ms": groq_parse_ms,
+            "groq_total_ms": groq_total_ms,
+        }
+    else:
+        groq_data_for_db = {
+            "groq_summary": f"Groq analysis failed: {groq_analysis_result.get('error', 'N/A')}",
+            "groq_concise_rationale": None,
+            "groq_overall_sentiment": "Error",
+            "groq_sentiment_scores_by_segment": None,
+            "groq_management_confidence_score": None,
+            "groq_evasiveness_score_q_a": None,
+            "groq_key_topics_discussed": None,
+            "groq_red_flags_identified": None,
+            "groq_raw_response_json": {"error": groq_analysis_result.get('error', 'N/A')},
+            "groq_request_ms": groq_req_ms,
+            "groq_parse_ms": groq_parse_ms,
+            "groq_total_ms": groq_total_ms,
+        }
 
     new_report = data_manager.create_analysis_report(
-        user_id=current_user.user_id,
-        transcript_id=transcript_id,
-        # Pass all relevant data from AI analysis results
-        **gemini_data_for_db,
-        **chatgpt_data_for_db,
-        comparison_notes=comparison_notes
-    )
+         user_id=current_user.user_id,
+         transcript_id=transcript_id,
+         # Pass all relevant data from AI analysis results
+         **gemini_data_for_db,
+         **chatgpt_data_for_db,
+         **groq_data_for_db
+     )
 
     if new_report:
-        flash("Dual AI analysis requested and saved successfully!", 'success')
-        # Debugging: Print the report ID to confirm creation
-        print(f"DEBUG: New analysis report created with ID: {new_report.report_id}")
+        flash("AI analysis requested and saved successfully!", 'success')
         return redirect(url_for('dashboard')) # Redirect back to dashboard to see new report
     else:
         # This branch indicates a problem with db.session.add() or db.session.commit()
         flash("Failed to save dual analysis report. Check server logs for details (e.g., IntegrityError).", 'danger')
-        print("DEBUG: Failed to create analysis report.") # More specific print
         return redirect(url_for('dashboard'))
 
 
@@ -602,34 +702,32 @@ def list_user_analysis_reports():
 
 
         reports_data.append({
-            "report_id": r.report_id,
-            "transcript_id": r.transcript_id,
-            "ticker_symbol": ticker_symbol,
-            "company_name": company_name,
-            "fiscal_year": fiscal_year,
-            "fiscal_quarter": fiscal_quarter,
-            "call_date": call_date,
-            "analysis_date": r.analysis_date.isoformat(),
+                 "report_id": r.report_id,
+                 "transcript_id": r.transcript_id,
+                 "ticker_symbol": ticker_symbol,
+                 "company_name": company_name,
+                 "fiscal_year": fiscal_year,
+                 "fiscal_quarter": fiscal_quarter,
+                 "call_date": call_date,
+                 "analysis_date": r.analysis_date.isoformat(),
 
-            "gemini_summary": r.gemini_summary,
-            "gemini_overall_sentiment": r.gemini_overall_sentiment,
-            "gemini_management_confidence_score": r.gemini_management_confidence_score,
-            "gemini_evasiveness_score_q_a": r.gemini_evasiveness_score_q_a,
-            "gemini_key_topics_discussed": r.gemini_key_topics_discussed,
-            "gemini_red_flags_identified": r.gemini_red_flags_identified,
-            "gemini_raw_response_json": r.gemini_raw_response_json,
+                 "gemini_summary": r.gemini_summary,
+                 "gemini_overall_sentiment": r.gemini_overall_sentiment,
+                 "gemini_management_confidence_score": r.gemini_management_confidence_score,
+                 "gemini_evasiveness_score_q_a": r.gemini_evasiveness_score_q_a,
+                 "gemini_key_topics_discussed": r.gemini_key_topics_discussed,
+                 "gemini_red_flags_identified": r.gemini_red_flags_identified,
+                 "gemini_raw_response_json": r.gemini_raw_response_json,
 
-            "chatgpt_summary": r.chatgpt_summary,
-            "chatgpt_overall_sentiment": r.chatgpt_overall_sentiment,
-            "chatgpt_sentiment_scores_by_segment": r.chatgpt_sentiment_scores_by_segment,
-            "chatgpt_management_confidence_score": r.chatgpt_management_confidence_score,
-            "chatgpt_evasiveness_score_q_a": r.chatgpt_evasiveness_score_q_a,
-            "chatgpt_key_topics_discussed": r.chatgpt_key_topics_discussed,
-            "chatgpt_red_flags_identified": r.chatgpt_red_flags_identified,
-            "chatgpt_raw_response_json": r.chatgpt_raw_response_json,
-
-            "comparison_notes": r.comparison_notes,
-        })
+                 "chatgpt_summary": r.chatgpt_summary,
+                 "chatgpt_overall_sentiment": r.chatgpt_overall_sentiment,
+                 "chatgpt_sentiment_scores_by_segment": r.chatgpt_sentiment_scores_by_segment,
+                 "chatgpt_management_confidence_score": r.chatgpt_management_confidence_score,
+                 "chatgpt_evasiveness_score_q_a": r.chatgpt_evasiveness_score_q_a,
+                 "chatgpt_key_topics_discussed": r.chatgpt_key_topics_discussed,
+                 "chatgpt_red_flags_identified": r.chatgpt_red_flags_identified,
+                 "chatgpt_raw_response_json": r.chatgpt_raw_response_json
+             })
     return jsonify(reports_data), 200
 
 @app.route('/analysis/<int:report_id>')
@@ -686,8 +784,10 @@ def view_raw_analysis_json(report_id, ai_name):
         raw_json = report.gemini_raw_response_json
     elif ai_name.lower() == 'chatgpt':
         raw_json = report.chatgpt_raw_response_json
+    elif ai_name.lower() == 'groq':
+        raw_json = report.groq_raw_response_json
     else:
-        return jsonify({"message": "Invalid AI name. Must be 'gemini' or 'chatgpt'."}), 400
+        return jsonify({"message": "Invalid AI name. Must be 'gemini', 'chatgpt' or 'groq'."}), 400
 
     if raw_json:
         return jsonify(raw_json)
@@ -764,7 +864,7 @@ if __name__ == '__main__':
                 ticker_symbol="AAPL",
                 fiscal_year=2025,
                 fiscal_quarter=1,
-                call_date=date(2025, 2, 1), # Use datetime.date
+                call_date=date(2025, 2, 1),
                 raw_text=dummy_transcript_text,
                 speaker_segments=[
                     {"speaker": "CEO Tim Cook", "text": "We are pleased to announce..."},
@@ -797,15 +897,21 @@ if __name__ == '__main__':
                     gemini_evasiveness_score_q_a=20,
                     gemini_key_topics_discussed=["iPhone Sales", "Services Growth", "Supply Chain", "China Market"],
                     gemini_red_flags_identified=["localized challenges (China)"],
-                    gemini_raw_response_json={"summary": "...", "overall_sentiment": "Positive"}, # Placeholder
+                    gemini_raw_response_json={"summary": "...", "overall_sentiment": "Positive"},
                     chatgpt_summary="ChatGPT: Apple had a transformative quarter with resilient performance. Management was cautiously optimistic but avoided specific future guidance.",
                     chatgpt_overall_sentiment="Neutral",
                     chatgpt_management_confidence_score=70,
                     chatgpt_evasiveness_score_q_a=60,
                     chatgpt_key_topics_discussed=["Macroeconomic Headwinds", "Operational Efficiencies", "Future Guidance Evasiveness"],
                     chatgpt_red_flags_identified=["not providing granular forward-looking revenue guidance"],
-                    chatgpt_raw_response_json={"summary": "...", "overall_sentiment": "Neutral"}, # Placeholder
-                    comparison_notes="Both AIs noted strong performance but also management's general guidance."
+                    chatgpt_raw_response_json={"summary": "...", "overall_sentiment": "Neutral"},
+                    groq_summary="Groq: None (placeholder)",
+                    groq_overall_sentiment=None,
+                    groq_management_confidence_score=None,
+                    groq_evasiveness_score_q_a=None,
+                    groq_key_topics_discussed=None,
+                    groq_red_flags_identified=None,
+                    groq_raw_response_json=None
                 )
                 print("Dummy analysis report seeded.")
 

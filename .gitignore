@@ -5,3 +5,4 @@
 data/__pycache__/
 services/__pycache__/
 typings/
+.hintrc

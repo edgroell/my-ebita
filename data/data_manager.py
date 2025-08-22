@@ -218,22 +218,21 @@ class DataManager:
 
     # --- Analysis Report Management ---
     def create_analysis_report(self, user_id, transcript_id,
-                               gemini_summary=None, gemini_overall_sentiment=None,
+                               gemini_summary=None, gemini_concise_rationale=None, gemini_overall_sentiment=None,
                                gemini_sentiment_scores_by_segment=None, gemini_management_confidence_score=None,
                                gemini_evasiveness_score_q_a=None, gemini_key_topics_discussed=None,
                                gemini_red_flags_identified=None, gemini_raw_response_json=None,
                                gemini_request_ms=None, gemini_parse_ms=None, gemini_total_ms=None,
-                               chatgpt_summary=None, chatgpt_overall_sentiment=None,
+                               chatgpt_summary=None, chatgpt_concise_rationale=None, chatgpt_overall_sentiment=None,
                                chatgpt_sentiment_scores_by_segment=None, chatgpt_management_confidence_score=None,
                                chatgpt_evasiveness_score_q_a=None, chatgpt_key_topics_discussed=None,
                                chatgpt_red_flags_identified=None, chatgpt_raw_response_json=None,
                                chatgpt_request_ms=None, chatgpt_parse_ms=None, chatgpt_total_ms=None,
-                               groq_summary=None, groq_overall_sentiment=None,
+                               groq_summary=None, groq_concise_rationale=None, groq_overall_sentiment=None,
                                groq_sentiment_scores_by_segment=None, groq_management_confidence_score=None,
                                groq_evasiveness_score_q_a=None, groq_key_topics_discussed=None,
                                groq_red_flags_identified=None, groq_raw_response_json=None,
-                               groq_request_ms=None, groq_parse_ms=None, groq_total_ms=None,
-                               comparison_notes=None):
+                               groq_request_ms=None, groq_parse_ms=None, groq_total_ms=None):
         """
         Creates a new AI analysis report, storing results from Gemini, ChatGPT and Groq.
         Returns the AnalysisReport object on success, None on error.
@@ -244,6 +243,7 @@ class DataManager:
                 transcript_id=transcript_id, # type: ignore
 
                 gemini_summary=gemini_summary, # type: ignore
+                gemini_concise_rationale=gemini_concise_rationale, # type: ignore
                 gemini_overall_sentiment=gemini_overall_sentiment, # type: ignore
                 gemini_sentiment_scores_by_segment=gemini_sentiment_scores_by_segment, # type: ignore
                 gemini_management_confidence_score=gemini_management_confidence_score, # type: ignore
@@ -257,6 +257,7 @@ class DataManager:
                 gemini_total_ms=gemini_total_ms, # type: ignore
 
                 chatgpt_summary=chatgpt_summary, # type: ignore
+                chatgpt_concise_rationale=chatgpt_concise_rationale, # type: ignore
                 chatgpt_overall_sentiment=chatgpt_overall_sentiment, # type: ignore
                 chatgpt_sentiment_scores_by_segment=chatgpt_sentiment_scores_by_segment, # type: ignore
                 chatgpt_management_confidence_score=chatgpt_management_confidence_score, # type: ignore
@@ -270,6 +271,7 @@ class DataManager:
                 chatgpt_total_ms=chatgpt_total_ms, # type: ignore
 
                 groq_summary=groq_summary, # type: ignore
+                groq_concise_rationale=groq_concise_rationale, # type: ignore
                 groq_overall_sentiment=groq_overall_sentiment, # type: ignore
                 groq_sentiment_scores_by_segment=groq_sentiment_scores_by_segment, # type: ignore
                 groq_management_confidence_score=groq_management_confidence_score, # type: ignore
@@ -281,8 +283,6 @@ class DataManager:
                 groq_request_ms=groq_request_ms, # type: ignore
                 groq_parse_ms=groq_parse_ms, # type: ignore
                 groq_total_ms=groq_total_ms, # type: ignore
-
-                comparison_notes=comparison_notes # type: ignore
             )
             self.db.session.add(new_report)
             self.db.session.commit()

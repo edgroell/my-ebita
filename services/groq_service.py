@@ -270,14 +270,12 @@ class GroqService:
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv
-    # Locate project root
     project_root = Path(__file__).resolve().parents[1]
     dotenv_path = project_root / ".env"
 
     if dotenv_path.exists():
         load_dotenv(dotenv_path=str(dotenv_path))
     else:
-        # fallback to default behavior (current working directory)
         load_dotenv()
 
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -288,7 +286,7 @@ if __name__ == "__main__":
         svc = GroqService(api_key=GROQ_API_KEY)
         test_transcript = "CEO: We had a solid quarter. Analyst: Any guidance? CFO: Not at this time."
         test_prompt = "Analyze the transcript and return the structured object as used by other services."
-        res = svc.analyze_transcript(test_transcript, test_prompt, temperature=0.2)
+        res = svc.analyze_transcript(test_transcript, test_prompt, temperature=0.3)
         if res.success:
             print(json.dumps(res.to_dict(), indent=2))
         else:

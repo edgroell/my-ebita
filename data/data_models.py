@@ -6,7 +6,6 @@ from datetime import datetime
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 
-
 db = SQLAlchemy()
 
 def get_current_datetime():
@@ -14,18 +13,15 @@ def get_current_datetime():
 
 class User(db.Model, UserMixin):
     """Contains all instances of users"""
-    __tablename__ = 'users'
+    __tablename__ = "users"
     user_id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=get_current_datetime)
+    is_active = db.Column(db.Boolean, default=True) # type: ignore
+    created_at = db.Column(db.DateTime, default=get_current_datetime)
     updated_at = db.Column(db.DateTime, default=get_current_datetime, onupdate=get_current_datetime)
-    last_login_at = db.Column(db.DateTime)
-    active_status = db.Column(db.Boolean, nullable=False, default=True)
-
-    def get_id(self):
-        return str(self.user_id)
+    last_login_at = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
@@ -33,56 +29,55 @@ class User(db.Model, UserMixin):
     def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
 
-    # Relationships
-    analysis_reports = db.relationship('AnalysisReport', backref='user', lazy=True, cascade="all, delete-orphan")
+    def get_id(self) -> str:
+        """
+        Flask-Login expects get_id() to return a unicode ID uniquely identifying
+        this user. Return the primary key as a string.
+        """
+        return str(self.user_id)
 
     def __repr__(self):
-        return f"<User {self.username} (Active: {self.active_status})>"
+        return f"<User {self.username} ({self.user_id})>"
 
 class Company(db.Model):
     """Stores static metadata about companies whose earnings calls will be analyzed."""
-    __tablename__ = 'companies'
-    ticker_symbol = db.Column(db.String(10), primary_key=True)
+    __tablename__ = "companies"
+    ticker_symbol = db.Column(db.String(16), primary_key=True)
     company_name = db.Column(db.String(255), nullable=False)
-    industry = db.Column(db.String(100))
-    sector = db.Column(db.String(100))
-    exchange = db.Column(db.String(50))
-    logo_url = db.Column(db.String(255))
-    last_updated = db.Column(db.DateTime, default=get_current_datetime, onupdate=get_current_datetime)
+    industry = db.Column(db.String(128))
+    sector = db.Column(db.String(128))
+    exchange = db.Column(db.String(64))
+    logo_url = db.Column(db.String(512))
 
-    # Relationships
-    earnings_call_transcripts = db.relationship('EarningsCallTranscript', backref='company', lazy=True)
+    transcripts = db.relationship("EarningsCallTranscript", back_populates="company", lazy=True)
 
     def __repr__(self):
-        return f"<Company {self.ticker_symbol} ({self.company_name})>"
+        return f"<Company {self.ticker_symbol} - {self.company_name}>"
 
 class EarningsCallTranscript(db.Model):
     """Stores the raw, processed text of earnings call transcripts."""
-    __tablename__ = 'earnings_call_transcripts'
+    __tablename__ = "earnings_call_transcripts"
     transcript_id = db.Column(db.Integer, primary_key=True)
-    ticker_symbol = db.Column(db.String(10), db.ForeignKey('companies.ticker_symbol'), nullable=False)
+    ticker_symbol = db.Column(db.String(16), db.ForeignKey("companies.ticker_symbol"), nullable=False)
     fiscal_year = db.Column(db.Integer, nullable=False)
     fiscal_quarter = db.Column(db.Integer, nullable=False)
-    call_date = db.Column(db.Date, nullable=False)
+    call_date = db.Column(db.DateTime)
     raw_text = db.Column(db.Text, nullable=False)
     speaker_segments = db.Column(db.JSON)
-    source_url = db.Column(db.String(255))
-    fetched_at = db.Column(db.DateTime, nullable=False, default=get_current_datetime)
+    source_url = db.Column(db.String(1024))
 
-    # Unique constraint for preventing duplicate transcripts
-    __table_args__ = (UniqueConstraint('ticker_symbol', 'fiscal_year', 'fiscal_quarter',
-                                       name='_ticker_fiscal_year_quarter_uc'),)
+    company = db.relationship("Company", back_populates="transcripts", lazy=True)
+    analysis_reports = db.relationship("AnalysisReport", back_populates="transcript", lazy=True, cascade="all, delete-orphan")
 
-    # Relationships
-    analysis_reports = db.relationship('AnalysisReport', back_populates='transcript', lazy=True, cascade="all, delete-orphan")
+    __table_args__ = (UniqueConstraint('ticker_symbol', 'fiscal_year', 'fiscal_quarter', name='_company_period_uc'),)
 
     def __repr__(self):
-        return f"<Transcript {self.ticker_symbol} FY{self.fiscal_year} Q{self.fiscal_quarter}>"
+        return f"<Transcript {self.transcript_id} {self.ticker_symbol} Q{self.fiscal_quarter} {self.fiscal_year}>"
 
 class AnalysisReport(db.Model):
     """
-    Stores the AI's generated "between-the-lines" reports for each transcript,
-    including output from Gemini, ChatGPT and Groq for direct comparison.
+    Stores AI-generated analysis for a transcript from multiple services.
+    Includes concise rationale and timing metrics for each service.
     """
     __tablename__ = 'analysis_reports'
     report_id = db.Column(db.Integer, primary_key=True)
@@ -90,17 +85,17 @@ class AnalysisReport(db.Model):
     transcript_id = db.Column(db.Integer, db.ForeignKey('earnings_call_transcripts.transcript_id'), nullable=False)
     analysis_date = db.Column(db.DateTime, nullable=False, default=get_current_datetime)
 
-    # Relationships
+    # Relationship
     transcript = db.relationship(
         'EarningsCallTranscript',
         foreign_keys=[transcript_id],
         back_populates='analysis_reports',
-        lazy=True,
-        overlaps="_transcript_backref,analysis_reports"
+        lazy=True
     )
 
     # --- Gemini Analysis Fields ---
     gemini_summary = db.Column(db.Text)
+    gemini_concise_rationale = db.Column(db.Text)
     gemini_overall_sentiment = db.Column(db.String(50))
     gemini_sentiment_scores_by_segment = db.Column(db.JSON)
     gemini_management_confidence_score = db.Column(db.Float)
@@ -116,6 +111,7 @@ class AnalysisReport(db.Model):
 
     # --- ChatGPT Analysis Fields ---
     chatgpt_summary = db.Column(db.Text)
+    chatgpt_concise_rationale = db.Column(db.Text)
     chatgpt_overall_sentiment = db.Column(db.String(50))
     chatgpt_sentiment_scores_by_segment = db.Column(db.JSON)
     chatgpt_management_confidence_score = db.Column(db.Float)
@@ -129,8 +125,9 @@ class AnalysisReport(db.Model):
     chatgpt_parse_ms = db.Column(db.Float)
     chatgpt_total_ms = db.Column(db.Float)
 
-    # --- Groq Analysis Fields (new) ---
+    # --- Groq Analysis Fields ---
     groq_summary = db.Column(db.Text)
+    groq_concise_rationale = db.Column(db.Text)
     groq_overall_sentiment = db.Column(db.String(50))
     groq_sentiment_scores_by_segment = db.Column(db.JSON)
     groq_management_confidence_score = db.Column(db.Float)
@@ -143,8 +140,6 @@ class AnalysisReport(db.Model):
     groq_request_ms = db.Column(db.Float)
     groq_parse_ms = db.Column(db.Float)
     groq_total_ms = db.Column(db.Float)
-
-    comparison_notes = db.Column(db.Text)
 
     __table_args__ = (UniqueConstraint('user_id', 'transcript_id', 'analysis_date',
                                        name='_user_transcript_date_uc'),)

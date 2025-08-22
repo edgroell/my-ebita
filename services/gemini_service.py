@@ -197,7 +197,7 @@ if __name__ == "__main__":
         print("Error: GEMINI_API_KEY environment variable not set for testing.")
     else:
         print("Testing GeminiService with gemini-2.5-flash...")
-        gemini = GeminiService(api_key=GEMINI_API_KEY)
+        gemini = GeminiService(api_key=GEMINI_API_KEY, default_model="gemini-2.5-flash")
 
         test_transcript = """
         CEO: "We've had a truly transformative quarter..."
@@ -210,7 +210,7 @@ if __name__ == "__main__":
         key_topics, red_flags.
         """
 
-        res = gemini.analyze_transcript(test_transcript, test_user_prompt, temperature=0.2)
+        res = gemini.analyze_transcript(test_transcript, test_user_prompt, temperature=0.3)
         if res.success:
             print(json.dumps(res.to_dict(), indent=2))
         else:

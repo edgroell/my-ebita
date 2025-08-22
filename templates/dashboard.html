@@ -47,9 +47,8 @@
                 <p class="text-gray-700 mb-4">Use the Transcript ID to run an analysis.</p>
 
                 {% set all_transcripts = data_manager.get_all_transcripts() %}
-                {% if all_transcripts %}
-                    <ul class="divide-y divide-gray-200">
-                        {% for transcript in all_transcripts %}
+                {%- if all_transcripts %}
+                    <ul class="divide-y divide-gray-200">{%- for transcript in all_transcripts %}
                             <li class="py-4 flex justify-between items-center">
                                 <div class="flex-1">
                                     <h3 class="text-lg font-medium text-gray-900">
@@ -72,9 +71,7 @@
                                         </button>
                                     </form>
                                 </div>
-                            </li>
-                        {% endfor %}
-                    </ul>
+                            </li>{%- endfor %}</ul>
                 {% else %}
                     <p class="text-gray-600">No transcripts found. Acquire one to get started!</p>
                 {% endif %}
@@ -88,7 +85,7 @@
         <div class="flex flex-col space-y-8">
             <div class="bg-white rounded-lg shadow-xl p-6">
                 <h2 class="text-2xl font-semibold text-gray-900 mb-4">Analyze Transcript</h2>
-                <p class="text-gray-700 mb-4">Select a transcript to run dual AI analysis.</p>
+                <p class="text-gray-700 mb-4">Select a transcript to run the AI analysis.</p>
                 <form id="analysis-form" action="{{ url_for('request_analysis') }}" method="POST" class="space-y-4">
                     <div>
                         <label for="transcript_id_analyze" class="block text-sm font-medium text-gray-700">Transcript ID</label>
@@ -104,7 +101,7 @@
                     <div>
                         <button id="analysis-button" type="submit"
                                 class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-300 ease-in-out">
-                            <span id="button-text">Run Dual AI Analysis</span>
+                            <span id="button-text">Run AI Analysis</span>
                             <svg id="loading-spinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -123,8 +120,7 @@
                 {% if current_user.is_authenticated %}
                     {% set reports = data_manager.get_reports_for_user(current_user.user_id) %}
                     {% if reports %}
-                        <ul class="divide-y divide-gray-200">
-                            {% for report in reports %}
+                        <ul class="divide-y divide-gray-200">{%- for report in reports -%}
                                 <li class="py-4 flex justify-between items-center">
                                     <a href="{{ url_for('view_analysis_report', report_id=report.report_id) }}" class="flex-1 block hover:bg-gray-50 transition duration-150 rounded-lg -m-2 p-2">
                                         <div class="flex items-center">
@@ -148,8 +144,7 @@
                                             Delete
                                         </button>
                                     </form>
-                                </li>
-                            {% endfor %}
+                                </li>{%- endfor %}
                         </ul>
                     {% else %}
                         <p class="text-gray-600">No analysis reports generated yet. Acquire a transcript and run an analysis!</p>
