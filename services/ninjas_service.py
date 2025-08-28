@@ -1,5 +1,7 @@
+# API-Ninjas service for fetching earnings call transcripts and company profiles
+
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union, List
 
 import requests
 
@@ -28,7 +30,7 @@ class NinjasService:
         }
         print("NinjasService initialized. Ready to fetch data from API Ninjas!")
 
-    def _make_request(self, endpoint: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _make_request(self, endpoint: str, params: Dict[str, Any]) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
         """
         Internal method to construct and send a generic GET API Ninjas request.
         Handles common error logging and JSON parsing.
@@ -46,11 +48,12 @@ class NinjasService:
         """
         url = f"{self.base_url}{endpoint}"
         print(f"Making request to {url} with params: {params}...")
+        response = None
         try:
             response = requests.get(url, headers=self.headers, params=params, timeout=30)
             response.raise_for_status()
 
-            response_json = response.json()
+            response_json: Union[Dict[str, Any], List[Dict[str, Any]]] = response.json()
 
             if isinstance(response_json, list) and not response_json:
                 print(f"No data found for the given parameters.")
@@ -72,7 +75,8 @@ class NinjasService:
         except requests.exceptions.Timeout as e:
             raise requests.exceptions.RequestException(f"API Ninjas request timed out: {e}") from e
         except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to decode JSON from API Ninjas response: {e}. Response: {response.text}") from e
+            response_text = response.text if response else "No response received"
+            raise ValueError(f"Failed to decode JSON from API Ninjas response: {e}. Response: {response_text}") from e
         except Exception as e:
             raise Exception(f"An unknown error occurred during API call to API Ninjas: {e}") from e
 
@@ -101,10 +105,10 @@ class NinjasService:
         """
         if not (1 <= quarter <= 4):
             raise ValueError("Quarter must be between 1 and 4.")
-        if not (1990 <= year <= 2100): # Realistic year range
+        if not (1900 <= year <= 2100): # Free tier only allows current year
             raise ValueError("Year seems a bit off. Please provide a realistic year.")
 
-        params = {
+        params: Dict[str, Union[str, int]] = {
             'ticker': ticker.upper(),
             'year': year,
             'quarter': quarter
@@ -116,9 +120,13 @@ class NinjasService:
             print(f"No transcript found for {ticker} Q{quarter} {year}. The silence is still deafening.")
             return None
 
-        date_str = transcript_data.get('date')
-        transcript_text = transcript_data.get('transcript')
-        transcript_split = transcript_data.get('transcript_split')
+        if isinstance(transcript_data, dict):
+            date_str: Optional[str] = transcript_data.get('date')
+            transcript_text = transcript_data.get('transcript')
+            transcript_split = transcript_data.get('transcript_split')
+        else:
+            print(f"Unexpected data format for transcript_data: {type(transcript_data)}")
+            return None
 
         if not transcript_text:
             print(f"Transcript text missing in response for {ticker} Q{quarter} {year}. Just empty words.")
@@ -132,7 +140,7 @@ class NinjasService:
 
     def get_company_profile_basic(self, ticker: str) -> Optional[Dict[str, str]]:
         """
-        Fetches basic company profile information (name, symbol, logo URL) using API Ninjas' Logo API.
+        Fetches basic company profile information (name, symbol, logo URL) using API Ninjas' logo API.
 
         Args:
             ticker (str): The stock ticker symbol (e.g., "AAPL", "MSFT").
@@ -155,9 +163,12 @@ class NinjasService:
             print(f"No basic profile found for ticker {ticker}.")
             return None
 
-        company_name = company_data.get('name')
-        company_symbol = company_data.get('ticker')
-        company_logo_url = company_data.get('image')
+        if isinstance(company_data, list) and company_data:
+            company_data = company_data[0]
+
+        company_name = company_data.get('name') if isinstance(company_data, dict) else None
+        company_symbol = company_data.get('ticker') if isinstance(company_data, dict) else None
+        company_logo_url = company_data.get('image') if isinstance(company_data, dict) else None
 
         if not company_name or not company_symbol or not company_logo_url:
             print(f"Missing 'name', 'ticker', or 'image' in basic profile for {ticker}. Incomplete data!")
@@ -183,18 +194,18 @@ if __name__ == "__main__":
     else:
         ninjas_service = NinjasService(api_key=API_NINJAS_KEY)
 
-        # --- Test Case 1: Fetch a known transcript (e.g., Microsoft Q1 2025) ---
-        print("\n--- Testing fetching Microsoft Q1 2025 transcript (with split confirmation) ---")
+        # --- Test Case 1: Fetch a known transcript (e.g., Microsoft Q2 2025) ---
+        print("\n--- Testing fetching Microsoft Q2 2025 transcript (with split confirmation) ---")
         try:
-            msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2025, quarter=1)
+            msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2025, quarter=2)
             if msft_transcript:
-                print(f"Date: {msft_transcript['date']}")
-                print(f"Transcript (first 500 chars):\n{msft_transcript['transcript'][:500]}...\n")
+                print(f"MSFT Transcript Date: {msft_transcript['date']}\n")
+                print(f"MSFT Transcript (first 500 chars): {msft_transcript['transcript'][:500]}...\n")
                 if msft_transcript['transcript_split']:
                     print(
                         f"Transcript Split Detected! First 3 segments:\n{json.dumps(msft_transcript['transcript_split'][:3], indent=2)}\n")
                 else:
-                    print("Transcript Split NOT detected (unexpected, but possible for some data points).")
+                    print("Transcript Split NOT detected!")
             else:
                 print("Failed to retrieve MSFT transcript (no data returned).")
         except (ValueError, requests.exceptions.RequestException, Exception) as e:
@@ -207,7 +218,7 @@ if __name__ == "__main__":
             googl_profile = ninjas_service.get_company_profile_basic(ticker="GOOG")
             if googl_profile:
                 print(f"Company Name: {googl_profile.get('name')}")
-                print(f"Ticker Symbol: {googl_profile.get('symbol')}\n")
+                print(f"Ticker Symbol: {googl_profile.get('symbol')}")
                 print(f"Logo URL: {googl_profile.get('logo_url')}\n")
             else:
                 print("Failed to retrieve GOOGL company profile (no data returned).")
