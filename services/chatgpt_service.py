@@ -1,30 +1,25 @@
 # ChatGPT service for analyzing earnings call transcripts
 
-from __future__ import annotations
-
 import json
 import time
-from typing import Any, Optional
 
+from pydantic import BaseModel
 from openai import OpenAI
 from openai import OpenAIError
 
-# Attempt to import AnalysisResult from the same directory
-try:
-    from .analysis_result import AnalysisResult
-except Exception:
-    import importlib.util
-    import sys
-    from pathlib import Path
 
-    _analysis_path = Path(__file__).resolve().parent / "analysis_result.py"
-    spec = importlib.util.spec_from_file_location("services.analysis_result", str(_analysis_path))
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load module spec for analysis_result from {_analysis_path}")
-    analysis_mod = importlib.util.module_from_spec(spec)
-    sys.modules["services.analysis_result"] = analysis_mod
-    spec.loader.exec_module(analysis_mod)
-    AnalysisResult = analysis_mod.AnalysisResult
+class AnalysisResult(BaseModel):
+    summary: str = ""
+    concise_rationale: str = ""
+    overall_sentiment: str = ""
+    management_confidence_score: int = 0
+    evasiveness_score_q_a: int = 0
+    key_topics: list[str] = []
+    red_flags: list[str] = []
+    request_time_ms: float = 0.00
+    model_used: str = ""
+    temperature: float = 0.0
+    max_tokens: int = 0
 
 
 class ChatGPTService:
@@ -34,7 +29,7 @@ class ChatGPTService:
     while returning a concise, structured JSON object (without exposing internal chain-of-thought).
     """
 
-    def __init__(self, api_key: str, model_name: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, model_name: str = "gpt-5-mini"):
         if not api_key:
             raise ValueError("OpenAI API key cannot be empty.")
         self.api_key = api_key
@@ -42,13 +37,33 @@ class ChatGPTService:
         self.model_name = model_name
         print(f"ChatGPTService initialized with model: {self.model_name}")
 
+    def _temp_param_number(self, temperature: float) -> float:
+        """
+        Return the correct temperature parameter number for the current model.
+        - Models in the 'gpt-5' family use exclusively 1.0
+        - Other models use a float between 0 and 2.0
+        """        
+        if "gpt-5" in self.model_name.lower():
+            return 1.0
+        return temperature
+
+    def _token_param_name(self) -> str:
+        """
+        Return the correct token parameter name for the current model.
+        - Models in the 'gpt-5' family use 'max_completion_tokens'
+        - Other models use 'max_tokens'
+        """
+        if "gpt-5" in self.model_name.lower():
+            return "max_completion_tokens"
+        return "max_tokens"
+
     def analyze_transcript(
         self,
         transcript_text: str,
-        user_prompt: str,
-        max_tokens: int = 1000,
         temperature: float = 0.3,
-    ) -> "AnalysisResult": # type: ignore
+        max_completion_tokens: int = 1000,
+        analysis_result_cls: type[AnalysisResult] = AnalysisResult
+    ) -> AnalysisResult:
         """
         Sends an earnings call transcript and a user-defined prompt to the ChatGPT model
         for analysis and returns a structured AnalysisResult. The prompt requests careful
@@ -57,110 +72,87 @@ class ChatGPTService:
         containing a concise rationale (1-2 sentences) and the structured fields.
         """
         if not transcript_text:
-            return AnalysisResult(success=False, error="Transcript text cannot be empty for analysis.", model_used=self.model_name)
+            raise ValueError("Parameter transcript_text cannot be empty.")
 
-        # Prompt uses chain-of-thought technique implicitly: ask model to reason carefully,
-        # but explicitly forbid exposing detailed internal chain-of-thought; require concise rationale only.
-        system_content = (
+        system_instructions = (
             "You are a financial analyst AI specializing in dissecting earnings call transcripts. "
             "When analyzing, internally reason step-by-step to improve accuracy (chain-of-thought). "
             "DO NOT reveal detailed internal chain-of-thought or step-by-step working in the output. "
-            "Only return a single valid JSON object with the fields described below. "
             "Include a very short 1-2 sentence 'concise_rationale' explaining the key reasons for your conclusions."
         )
 
-        user_content = (
+        user_instructions = (
             f"Here is an earnings call transcript:\n\n---\n{transcript_text}\n---\n\n"
-            f"Based on the transcript, {user_prompt}. "
-            "Return ONLY a valid JSON object with these keys: "
-            '"summary" (string), '
-            '"concise_rationale" (string, 1-2 sentences), '
-            '"overall_sentiment" (\"Positive\", \"Neutral\", or \"Negative\"), '
-            '"management_confidence_score" (integer 0-100), '
-            '"evasiveness_score_q_a" (integer 0-100), '
-            '"key_topics" (array of 3-5 strings), '
-            '"red_flags" (array of strings). '
-            "Do NOT include any extraneous text or internal reasoning. Ensure the JSON is well-formed."
+            'Based on the transcript, try to return a structured output with these keys: '
+            '"summary" (string, 3-5 sentences providing a brief overview of the key points), '
+            '"concise_rationale" (string, 1-2 sentences explaining the key reasons for your conclusions), '
+            '"overall_sentiment" (' 
+            ' \"Positive\" if the outlook of the company is optimistic from an investor point of view,'
+            ' \"Neutral\" if the outlook of the company is neither optimistic nor pessimistic from an investor point of view, or '
+            ' \"Negative\" if the outlook of the company is pessimistic from an investor point of view'
+            '), '
+            '"management_confidence_score" (integer 0-100, providing a measure of how confident management is in their guidance, '
+            '0 meaning not confident at all and 100 meaning very confident), '
+            '"evasiveness_score_q_a" (integer 0-100, assessing how evasive management was during Q&A,'
+            '0 meaning not evasive at all and 100 meaning very evasive), '
+            '"key_topics" (array of 3-5 strings, highlighting the main topics discussed), '
+            '"red_flags" (array of 3-5 strings, noting any potential concerns raised). '
+            "Do NOT include any extraneous text or internal reasoning. Ensure the structured output is well-formed."
         )
 
-        messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": user_content},
+        messages_instructions = [
+            {"role": "system", "content": system_instructions},
+            {"role": "user", "content": user_instructions},
         ]
 
-        analysis_content: Optional[Any] = None
-        api_elapsed = None
-        parse_elapsed = None
-        start = time.perf_counter()
+        request_elapsed = None
+        request_start = time.perf_counter()
+
+        temp_param = self._temp_param_number(temperature)
+        token_param = self._token_param_name()
+        params = {
+            "model": self.model_name,
+            "messages": messages_instructions,  # type: ignore
+            "temperature": temp_param,
+            token_param: max_completion_tokens,
+        }
 
         try:
-            # Start the API timer immediately before sending the request
-            api_start = time.perf_counter()
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,  # type: ignore
-                max_tokens=max_tokens,
-                temperature=temperature,
-                response_format={"type": "json_object"},
+            completion = self.client.chat.completions.parse(
+                **params,
+                response_format=analysis_result_cls,
             )
 
-            # Extract the model output safely
             analysis_content = None
             try:
-                analysis_content = response.choices[0].message.content
-            except Exception:
-                try:
-                    analysis_content = getattr(response.choices[0].message, "content", None)
-                except Exception:
-                    analysis_content = None
+                analysis_content = completion.choices[0].message.parsed
+            except Exception as parse_exc:
+                raise ValueError(f"Failed to parse structured response: {parse_exc}") from parse_exc
 
             if analysis_content is None:
-                raise ValueError("Received None for analysis_content, cannot parse JSON.")
+                raise ValueError("Received None for analysis_content.")
 
-            # parse start
-            parse_start = time.perf_counter()
+            request_end = time.perf_counter()
+            request_elapsed = (request_end - request_start) * 1000.0
 
-            # If the API returned a dict already, use it. Otherwise parse string.
-            if isinstance(analysis_content, (dict, list)):
-                parsed_content = analysis_content  # type: ignore
-            else:
-                parsed_content = json.loads(analysis_content)
+            try:
+                setattr(analysis_content, "request_time_ms", request_elapsed)
+                setattr(analysis_content, "model_used", self.model_name)
+                setattr(analysis_content, "temperature", temp_param)
+                setattr(analysis_content, "max_tokens", max_completion_tokens)
+            except Exception:
+                pass
 
-            # If parsed content is a list with a single dict, accept that too
-            if isinstance(parsed_content, list) and parsed_content and isinstance(parsed_content[0], dict):
-                parsed_content = parsed_content[0]
+            return analysis_content
+        
+        except OpenAIError as oe:
+            raise ValueError(f"Failed to get analysis from ChatGPT: {oe}")
 
-            if not isinstance(parsed_content, dict):
-                raise ValueError("Parsed AI response is not a JSON object/dict.")
-
-            # parse end
-            parse_end = time.perf_counter()
-
-            # api_elapsed is defined as time from api_start until parsing finished
-            api_elapsed = (parse_end - api_start) * 1000.0
-            parse_elapsed = (parse_end - parse_start) * 1000.0
-            total_elapsed = (time.perf_counter() - start) * 1000.0
-
-            result = AnalysisResult.from_dict(parsed_content, model_used=self.model_name)
-            result.request_ms = api_elapsed
-            result.parse_ms = parse_elapsed
-            result.total_ms = total_elapsed
-            return result
-
-        except OpenAIError as e:
-            total_elapsed = (time.perf_counter() - start) * 1000.0
-            print(f"OpenAI API Error: {e}")
-            return AnalysisResult(success=False, error=f"Failed to get analysis from ChatGPT: {e}", model_used=self.model_name, request_ms=api_elapsed, parse_ms=parse_elapsed, total_ms=total_elapsed)
         except json.JSONDecodeError as e:
-            total_elapsed = (time.perf_counter() - start) * 1000.0
-            raw = analysis_content if analysis_content is not None else "Raw response not available"
-            print(f"JSON decode error: {e}. Raw: {str(raw)[:400]}")
-            return AnalysisResult(success=False, error=f"Failed to parse AI response as JSON: {e}", model_used=self.model_name, request_ms=api_elapsed, parse_ms=parse_elapsed, total_ms=total_elapsed)
-        except Exception as e:
-            total_elapsed = (time.perf_counter() - start) * 1000.0
-            print(f"An unexpected error occurred: {e}")
-            return AnalysisResult(success=False, error=f"An unexpected error occurred: {e}", model_used=self.model_name, request_ms=api_elapsed, parse_ms=parse_elapsed, total_ms=total_elapsed)
+            raise ValueError(f"Failed to parse AI response as JSON: {e}")
 
+        except Exception as e:
+            raise ValueError(f"An unexpected error occurred: {e}")
 
 # TESTING
 if __name__ == "__main__":
@@ -173,10 +165,9 @@ if __name__ == "__main__":
 
     if not OPENAI_API_KEY:
         print("Error: OPENAI_API_KEY environment variable not set for testing.")
-        print("Please set it before running the example: export OPENAI_API_KEY='your_key_here'")
     else:
-        print("Testing ChatGPTService with gpt-4o-mini...")
-        chatgpt_analyzer = ChatGPTService(api_key=OPENAI_API_KEY, model_name="gpt-4o-mini")
+        chatgpt_analyzer = ChatGPTService(api_key=OPENAI_API_KEY, model_name="gpt-5-mini")
+        print(f"--- Testing ChatGPTService with {chatgpt_analyzer.model_name} ---")
 
         test_transcript = """
         CEO: "We've had a truly transformative quarter, navigating significant macroeconomic headwinds with unparalleled agility. Our strategic repositioning initiatives are yielding promising preliminary indicators, suggesting robust potential for enhanced shareholder value in the mid-to-long term."
@@ -184,22 +175,35 @@ if __name__ == "__main__":
         CFO: "As we've stated, our focus remains on operational efficiencies and prudently managing our cost structure. While we are observing certain market fluctuations, our internal projections remain cautiously optimistic regarding our capacity to deliver sustainable returns. We are not providing granular forward-looking revenue guidance at this juncture, preferring to allow our ongoing investments in innovation to speak for themselves."
         """
 
-        test_prompt = """
-        Analyze the transcript. Return a structured object with the following keys:
-        - "summary": A concise summary of the call (string).
-        - "concise_rationale": A 1-2 sentence rationale (string).
-        - "overall_sentiment": "Positive", "Neutral", or "Negative" (string).
-        - "management_confidence_score": A score from 0 to 100 for management's confidence (integer).
-        - "evasiveness_score_q_a": A score from 0 to 100 for evasiveness in Q&A (integer).
-        - "key_topics": A list of 3-5 main topics discussed (array of strings).
-        - "red_flags": A list of any specific red flags or evasive phrases identified (array of strings).
-        """
+        try:
+            analysis_result = chatgpt_analyzer.analyze_transcript(
+                transcript_text=test_transcript,
+                temperature=1.0,
+                max_completion_tokens=2500,
+            )
+        except Exception as exc:
+            print("analyze_transcript raised an exception:", exc)
+            analysis_result = None
 
-        analysis_result = chatgpt_analyzer.analyze_transcript(test_transcript, test_prompt, temperature=0.2)
+        print("analyze_transcript returned (or failed) -> continue to result handling")
 
-        if analysis_result.success:
-            print(f"\n--- ChatGPT Analysis ({analysis_result.model_used}) ---")
-            print(json.dumps(analysis_result.to_dict(), indent=2))
+        if analysis_result is None:
+            print("No analysis_result object (call failed).")
         else:
-            print("\n--- ChatGPT Analysis Error ---")
-            print(analysis_result.error)
+            try:
+                print(
+                    f"\n--- ChatGPT Analysis {analysis_result.model_used} executed in {analysis_result.request_time_ms:.2f} ms ---"
+                    f"\nSummary: {analysis_result.summary}"
+                    f"\nRationale: {analysis_result.concise_rationale}"
+                    f"\nSentiment: {analysis_result.overall_sentiment}"
+                    f"\nConfidence: {analysis_result.management_confidence_score}"
+                    f"\nEvasiveness: {analysis_result.evasiveness_score_q_a}"
+                    f"\nKey Topics: {', '.join(analysis_result.key_topics)}"
+                    f"\nRed Flags: {', '.join(analysis_result.red_flags)}"
+                    f"\nTemperature: {analysis_result.temperature}"
+                    f"\nMax Tokens: {analysis_result.max_tokens}"
+                )
+                print("\n--- Full Analysis Result ---")
+                print(analysis_result)
+            except Exception as exc:
+                print("Failed to print analysis result:", exc)
