@@ -2,292 +2,194 @@
 
 import json
 import time
-import requests
-import re
-from typing import Any, Dict, Optional
-from pathlib import Path
 
-# Attempt to import AnalysisResult from the same directory
-try:
-    from .analysis_result import AnalysisResult
-except Exception:
-    import importlib.util
-    import sys
+from openai import OpenAIError
+from pydantic import BaseModel
+from groq import Groq
+from groq import GroqError
 
-    _analysis_path = Path(__file__).resolve().parent / "analysis_result.py"
-    spec = importlib.util.spec_from_file_location("services.analysis_result", str(_analysis_path))
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load analysis_result.py at {_analysis_path}")
-    analysis_mod = importlib.util.module_from_spec(spec)
-    sys.modules["services.analysis_result"] = analysis_mod
-    spec.loader.exec_module(analysis_mod)
-    AnalysisResult = analysis_mod.AnalysisResult
 
-# Ensure the name `Groq` is always defined to satisfy static analysis; assign the real class if import succeeds.
-Groq: Any = None
-try:
-    from groq import Groq as _Groq
-    Groq = _Groq
-    _HAS_GROQ_SDK = True
-except Exception:
-    Groq = None
-    _HAS_GROQ_SDK = False
+class AnalysisResult(BaseModel):
+    summary: str
+    concise_rationale: str
+    overall_sentiment: str
+    management_confidence_score: int
+    evasiveness_score_q_a: int
+    key_topics: list[str]
+    red_flags: list[str]
+    request_time_ms: float
+    model_used: str
+    temperature: float
+    max_tokens: int
 
 
 class GroqService:
     """
-    A service class to interact with the Groq models via HTTP (requests).
-    Prompts the model to use internal chain-of-thought but returns a concise JSON object.
-    Measures api_elapsed_ms (from api_start until parsing finished), parse_elapsed_ms, total_ms.
+    A service class to interact with the Groq models (e.g., openai/gpt-oss-20b or openai/gpt-oss-120b).
+    Uses a prompting pattern that instructs the model to reason carefully (chain-of-thought internally)
+    while returning a concise, structured JSON object (without exposing internal chain-of-thought).
     """
 
-    def __init__(self, api_key: str, default_model: str = "openai/gpt-oss-20b", base_url: str = "https://api.groq.ai/v1/"):
+    def __init__(self, api_key: str, model_name: str = "openai/gpt-oss-20b"):
         if not api_key:
             raise ValueError("Groq API key cannot be empty.")
         self.api_key = api_key
-        self.default_model = default_model
-        self.base_url = base_url.rstrip("/") + "/"
-        self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
-        # Use a requests.Session for potential connection reuse
-        self.session = requests.Session()
-        print(f"GroqService initialized with model: {self.default_model}")
+        self.client = Groq(api_key=self.api_key)
+        self.model_name = model_name
+        print(f"GroqService initialized with model: {self.model_name}")
 
-        if _HAS_GROQ_SDK:
-            try:
-                self.sdk_client = Groq(api_key=self.api_key)
-            except Exception as e:
-                # keep SDK off if init fails
-                self.sdk_client = None
-                print(f"Groq SDK init failed, falling back to HTTP client: {e}")
-
-    def _make_request(self, model_name: str, payload: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
-        # Use SDK if present
-        if _HAS_GROQ_SDK and getattr(self, "sdk_client", None) is not None:
-            try:
-                # Use a local variable so static type checkers understand it is not None
-                sdk = getattr(self, "sdk_client", None)
-                if sdk is None:
-                    # If sdk_client is unexpectedly None, raise to allow fallback to HTTP path
-                    raise RuntimeError("Groq SDK client is not initialized")
-                sdk_payload = {
-                    "messages": payload.get("messages") or [{"role":"user","content": payload.get("prompt","")}],
-                    "model": model_name,
-                    "stream": False,
-                }
-                return sdk.chat.completions.create(**sdk_payload)
-            except Exception as e:
-                # Provide clearer guidance when model is not found / inaccessible
-                err_text = str(e)
-                if "model_not_found" in err_text or "does not exist" in err_text or getattr(e, "status_code", None) == 404:
-                    raise ValueError(
-                        f"Groq SDK error: model '{model_name}' not found or not accessible for this API key. "
-                        "Check your Groq Console for available models and update default_model. "
-                        f"Underlying error: {e}"
-                    ) from e
-                # If the SDK client was unexpectedly not available, allow falling back to the HTTP path below
-                if isinstance(e, RuntimeError):
-                    pass
-                else:
-                    raise ValueError(f"Groq SDK error: {e}") from e
-
-        # fallback HTTP path (unchanged)
-        url = f"{self.base_url}models/{model_name}/invoke"
-        resp = self.session.post(url, headers=self.headers, json=payload, timeout=timeout)
-        resp.raise_for_status()
-        return resp.json()
-
-    def generate_content(self, prompt_text: str, model_name: Optional[str] = None, temperature: Optional[float] = None) -> Dict[str, Any]:
+    def analyze_transcript(
+        self,
+        transcript_text: str,
+        temperature: float = 0.3,
+        max_completion_tokens: int = 1000,
+        analysis_result_cls: type[AnalysisResult] = AnalysisResult
+    ) -> AnalysisResult:
         """
-        Sends prompt to Groq and returns:
-          - parsed (dict): parsed JSON object returned by model
-          - api_elapsed_ms (float)
-          - parse_elapsed_ms (float)
+        Sends an earnings call transcript and a user-defined prompt to the ChatGPT model
+        for analysis and returns a structured AnalysisResult. The prompt requests careful
+        step-by-step internal reasoning (chain-of-thought) but instructs the model NOT to
+        output raw internal reasoning. Instead the model must return a valid JSON object
+        containing a concise rationale (1-2 sentences) and the structured fields.
         """
-        model_to_use = model_name or self.default_model
-        payload: Dict[str, Any] = {
-            "prompt": prompt_text,
-        }
-        if temperature is not None:
-            payload["temperature"] = float(temperature)
-
-        api_start = time.perf_counter()
-        response_data = self._make_request(model_to_use, payload)
-        parse_start = time.perf_counter()
-
-        raw_text: Optional[str] = None
-        parsed: Dict[str, Any]
-        try:
-            # Try common response shapes to extract text content
-            raw_text = None
-
-            # SDK object shape: ChatCompletion with .choices -> Choice -> .message -> .content
-            # Support both dict-shaped HTTP responses and SDK objects by extracting choices safely.
-            choices = None
-            if isinstance(response_data, dict):
-                choices = response_data.get("choices")
-            else:
-                choices = getattr(response_data, "choices", None)
-
-            if choices:
-                candidate = choices[0]
-                # candidate may be an object or a dict
-                if isinstance(candidate, dict):
-                    # dict candidate may contain "message" or "text"
-                    msg = candidate.get("message") or candidate.get("text")
-                elif hasattr(candidate, "message"):
-                    msg = candidate.message
-                else:
-                    msg = candidate
-
-                # msg may be a plain string, an object with .content, or a dict with "content" / "text"
-                if isinstance(msg, str):
-                    raw_text = msg
-                else:
-                    raw_text = (
-                        getattr(msg, "content", None)
-                        or (msg.get("content") if isinstance(msg, dict) else None)
-                        or (msg.get("text") if isinstance(msg, dict) else None)
-                    )
-
-            # Fallback dict HTTP shapes
-            if raw_text is None and isinstance(response_data, dict):
-                if "outputs" in response_data and isinstance(response_data["outputs"], list) and response_data["outputs"]:
-                    candidate = response_data["outputs"][0]
-                    raw_text = candidate.get("text") or candidate.get("content") or json.dumps(candidate)
-                elif "choices" in response_data and isinstance(response_data["choices"], list) and response_data["choices"]:
-                    candidate = response_data["choices"][0]
-                    if isinstance(candidate, dict) and isinstance(candidate.get("message"), dict):
-                        raw_text = candidate["message"].get("content")
-                    else:
-                        raw_text = candidate.get("text") or json.dumps(candidate)
-                elif "result" in response_data:
-                    raw_text = response_data["result"] if isinstance(response_data["result"], str) else json.dumps(response_data["result"])
-                elif "text" in response_data:
-                    raw_text = response_data["text"]
-                else:
-                    raw_text = json.dumps(response_data)
-
-            # As a last resort, stringify the object
-            if raw_text is None:
-                raw_text = str(response_data)
-
-            # Attempt to parse JSON text returned by the model
-            if raw_text is None:
-                raise ValueError("Groq returned no text content to parse.")
-
-            try:
-                parsed_candidate = json.loads(raw_text)
-            except json.JSONDecodeError:
-                # Try to recover by extracting the first JSON object in the string
-                m = re.search(r'(\{.*\})', raw_text, re.DOTALL)
-                if m:
-                    try:
-                        parsed_candidate = json.loads(m.group(1))
-                    except json.JSONDecodeError:
-                        preview = raw_text[:500] if raw_text else "No content available"
-                        raise ValueError(f"Failed to decode JSON from Groq response (after extraction). Raw preview: {preview}")
-                else:
-                    preview = raw_text[:500] if raw_text else "No content available"
-                    raise ValueError(f"Failed to decode JSON from Groq response. Raw preview: {preview}")
-
-            if isinstance(parsed_candidate, list) and parsed_candidate and isinstance(parsed_candidate[0], dict):
-                parsed = parsed_candidate[0]
-            elif isinstance(parsed_candidate, dict):
-                parsed = parsed_candidate
-            else:
-                raise ValueError("Groq returned JSON that is not an object/dict.")
-        except json.JSONDecodeError as e:
-            preview = raw_text[:500] if raw_text else "No content available"
-            raise ValueError(f"Failed to decode JSON from Groq response: {e}. Raw preview: {preview}") from e
-        except Exception as e:
-            raise ValueError(f"Unexpected format from Groq response: {e}. Full response: {json.dumps(response_data, indent=2)}") from e
-        finally:
-            parse_end = time.perf_counter()
-
-        api_elapsed_ms = (parse_end - api_start) * 1000.0
-        parse_elapsed_ms = (parse_end - parse_start) * 1000.0
-        return {"parsed": parsed, "api_elapsed_ms": api_elapsed_ms, "parse_elapsed_ms": parse_elapsed_ms}
-
-    def analyze_transcript(self, transcript_text: str, user_prompt: str, model_name: Optional[str] = None, temperature: float = 0.3) -> AnalysisResult: # type: ignore
         if not transcript_text:
-            return AnalysisResult(success=False, error="Transcript text cannot be empty for analysis.", model_used=model_name or self.default_model)
-
-        model_to_use = model_name or self.default_model
+            raise ValueError("Parameter transcript_text cannot be empty.")
 
         system_instructions = (
             "You are a financial analyst AI specializing in dissecting earnings call transcripts. "
             "When analyzing, internally reason step-by-step to improve accuracy (chain-of-thought). "
             "DO NOT reveal detailed internal chain-of-thought or step-by-step working in the output. "
-            "Only return a single valid JSON object with the fields described below. "
             "Include a very short 1-2 sentence 'concise_rationale' explaining the key reasons for your conclusions."
         )
 
         user_instructions = (
             f"Here is an earnings call transcript:\n\n---\n{transcript_text}\n---\n\n"
-            f"Based on the transcript, {user_prompt}. "
-            "Return ONLY a valid JSON object with these keys: "
-            '"summary" (string), '
-            '"concise_rationale" (string, 1-2 sentences), '
-            '"overall_sentiment" (\"Positive\", \"Neutral\", or \"Negative\"), '
-            '"management_confidence_score" (integer 0-100), '
-            '"evasiveness_score_q_a" (integer 0-100), '
-            '"key_topics" (array of 3-5 strings), '
-            '"red_flags" (array of strings). '
-            "Do NOT include any extraneous text or internal reasoning. Ensure the JSON is well-formed."
+            'Based on the transcript, try to return a structured output with these keys: '
+            '"summary" (string, 3-5 sentences providing a brief overview of the key points), '
+            '"concise_rationale" (string, 1-2 sentences explaining the key reasons for your conclusions), '
+            '"overall_sentiment" (' 
+            ' \"Positive\" if the outlook of the company is optimistic from an investor point of view,'
+            ' \"Neutral\" if the outlook of the company is neither optimistic nor pessimistic from an investor point of view, or '
+            ' \"Negative\" if the outlook of the company is pessimistic from an investor point of view'
+            '), '
+            '"management_confidence_score" (integer 0-100, providing a measure of how confident management is in their guidance, '
+            '0 meaning not confident at all and 100 meaning very confident), '
+            '"evasiveness_score_q_a" (integer 0-100, assessing how evasive management was during Q&A,'
+            '0 meaning not evasive at all and 100 meaning very evasive), '
+            '"key_topics" (array of 3-5 strings, highlighting the main topics discussed), '
+            '"red_flags" (array of 3-5 strings, noting any potential concerns raised). '
+            "Do NOT include any extraneous text or internal reasoning. Ensure the structured output is well-formed."
         )
 
-        full_prompt = f"{system_instructions}\n\n{user_instructions}"
-        start = time.perf_counter()
-        api_elapsed = None
-        parse_elapsed = None
+        messages_instructions = [
+            {"role": "system", "content": system_instructions},
+            {"role": "user", "content": user_instructions},
+        ]
+
+        request_elapsed = None
+        request_start = time.perf_counter()
+
+        params = {
+            "model": self.model_name,
+            "messages": messages_instructions,  # type: ignore
+            "temperature": temperature,
+            "max_tokens": max_completion_tokens,
+        }
 
         try:
-            api_start = time.perf_counter()
-            gen = self.generate_content(full_prompt, model_name=model_to_use, temperature=temperature)
-            parse_end = time.perf_counter()
+            completion = self.client.chat.completions.create(
+                **params,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema":{
+                        "name": "analysis_result",
+                        "schema": analysis_result_cls.model_json_schema(),
+                    }
+                }
+            )
 
-            api_elapsed = gen.get("api_elapsed_ms")
-            parse_elapsed = gen.get("parse_elapsed_ms")
-            total_elapsed = (time.perf_counter() - start) * 1000.0
+            analysis_content = None
+            try:
+                analysis_content = AnalysisResult.model_validate(json.loads(completion.choices[0].message.content))
+            except Exception as parse_exc:
+                raise ValueError(f"Failed to parse structured response: {parse_exc}") from parse_exc
 
-            parsed_analysis = gen["parsed"]
-            if not isinstance(parsed_analysis, dict):
-                raise ValueError("Parsed Groq output is not a dict.")
+            if analysis_content is None:
+                raise ValueError("Received None for analysis_content.")
 
-            result = AnalysisResult.from_dict(parsed_analysis, model_used=model_to_use)
-            result.request_ms = api_elapsed
-            result.parse_ms = parse_elapsed
-            result.total_ms = total_elapsed
-            return result
+            request_end = time.perf_counter()
+            request_elapsed = (request_end - request_start) * 1000.0
+
+            try:
+                setattr(analysis_content, "request_time_ms", request_elapsed)
+                setattr(analysis_content, "model_used", self.model_name)
+                setattr(analysis_content, "temperature", temperature)
+                setattr(analysis_content, "max_tokens", max_completion_tokens)
+            except Exception:
+                pass
+
+            return analysis_content
+        
+        except GroqError as oe:
+            raise ValueError(f"Failed to get analysis from Groq: {oe}")
+
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse AI response as JSON: {e}")
+
         except Exception as e:
-            total_elapsed = (time.perf_counter() - start) * 1000.0
-            return AnalysisResult(success=False, error=f"Failed to get analysis from Groq: {e}", model_used=model_to_use, request_ms=api_elapsed, parse_ms=parse_elapsed, total_ms=total_elapsed)
+            raise ValueError(f"An unexpected error occurred: {e}")
 
 
+# TESTING
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv
-    project_root = Path(__file__).resolve().parents[1]
-    dotenv_path = project_root / ".env"
 
-    if dotenv_path.exists():
-        load_dotenv(dotenv_path=str(dotenv_path))
-    else:
-        load_dotenv()
+    load_dotenv()
 
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
     if not GROQ_API_KEY:
-        print(f"Error: GROQ_API_KEY environment variable not set for testing. Attempted to load .env from: {dotenv_path}")
+        print("Error: GROQ_API_KEY environment variable not set for testing.")
     else:
-        svc = GroqService(api_key=GROQ_API_KEY)
-        test_transcript = "CEO: We had a solid quarter. Analyst: Any guidance? CFO: Not at this time."
-        test_prompt = "Analyze the transcript and return the structured object as used by other services."
-        res = svc.analyze_transcript(test_transcript, test_prompt, temperature=0.3)
-        if res.success:
-            print(json.dumps(res.to_dict(), indent=2))
+        groq_analyzer = GroqService(api_key=GROQ_API_KEY, model_name="openai/gpt-oss-20b")
+        print(f"--- Testing GroqService with {groq_analyzer.model_name} ---")
+
+        test_transcript = """
+        CEO: "We've had a truly transformative quarter, navigating significant macroeconomic headwinds with unparalleled agility. Our strategic repositioning initiatives are yielding promising preliminary indicators, suggesting robust potential for enhanced shareholder value in the mid-to-long term."
+        Analyst: "Can you provide more specific guidance on revenue growth for the next fiscal year, given the recent market volatility?"
+        CFO: "As we've stated, our focus remains on operational efficiencies and prudently managing our cost structure. While we are observing certain market fluctuations, our internal projections remain cautiously optimistic regarding our capacity to deliver sustainable returns. We are not providing granular forward-looking revenue guidance at this juncture, preferring to allow our ongoing investments in innovation to speak for themselves."
+        """
+
+        try:
+            analysis_result = groq_analyzer.analyze_transcript(
+                transcript_text=test_transcript,
+                temperature=1.0,
+                max_completion_tokens=2500,
+            )
+        except Exception as exc:
+            print("analyze_transcript raised an exception:", exc)
+            analysis_result = None
+
+        print("analyze_transcript returned (or failed) -> continue to result handling")
+
+        if analysis_result is None:
+            print("No analysis_result object (call failed).")
         else:
-            print(f"Error: {res.error}")
+            try:
+                print(
+                    f"\n--- Groq Analysis {analysis_result.model_used} executed in {analysis_result.request_time_ms:.2f} ms ---"
+                    f"\nSummary: {analysis_result.summary}"
+                    f"\nRationale: {analysis_result.concise_rationale}"
+                    f"\nSentiment: {analysis_result.overall_sentiment}"
+                    f"\nConfidence: {analysis_result.management_confidence_score}"
+                    f"\nEvasiveness: {analysis_result.evasiveness_score_q_a}"
+                    f"\nKey Topics: {', '.join(analysis_result.key_topics)}"
+                    f"\nRed Flags: {', '.join(analysis_result.red_flags)}"
+                    f"\nTemperature: {analysis_result.temperature}"
+                    f"\nMax Tokens: {analysis_result.max_tokens}"
+                )
+                print("\n--- Full Analysis Result ---")
+                print(analysis_result)
+            except Exception as exc:
+                print("Failed to print analysis result:", exc)

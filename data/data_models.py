@@ -44,9 +44,6 @@ class Company(db.Model):
     __tablename__ = "companies"
     ticker_symbol = db.Column(db.String(16), primary_key=True)
     company_name = db.Column(db.String(255), nullable=False)
-    industry = db.Column(db.String(128))
-    sector = db.Column(db.String(128))
-    exchange = db.Column(db.String(64))
     logo_url = db.Column(db.String(512))
 
     transcripts = db.relationship("EarningsCallTranscript", back_populates="company", lazy=True)
@@ -55,15 +52,15 @@ class Company(db.Model):
         return f"<Company {self.ticker_symbol} - {self.company_name}>"
 
 class EarningsCallTranscript(db.Model):
-    """Stores the raw, processed text of earnings call transcripts."""
+    """Stores the earnings call transcripts."""
     __tablename__ = "earnings_call_transcripts"
     transcript_id = db.Column(db.Integer, primary_key=True)
     ticker_symbol = db.Column(db.String(16), db.ForeignKey("companies.ticker_symbol"), nullable=False)
     fiscal_year = db.Column(db.Integer, nullable=False)
     fiscal_quarter = db.Column(db.Integer, nullable=False)
     call_date = db.Column(db.DateTime)
-    raw_text = db.Column(db.Text, nullable=False)
-    speaker_segments = db.Column(db.JSON)
+    # store the transcript as JSON (or large text). db.Object is not a SQLAlchemy type.
+    transcript_raw = db.Column(db.JSON, nullable=False)
     source_url = db.Column(db.String(1024))
 
     company = db.relationship("Company", back_populates="transcripts", lazy=True)
@@ -106,8 +103,6 @@ class AnalysisReport(db.Model):
 
     # Gemini timing
     gemini_request_ms = db.Column(db.Float)
-    gemini_parse_ms = db.Column(db.Float)
-    gemini_total_ms = db.Column(db.Float)
 
     # --- ChatGPT Analysis Fields ---
     chatgpt_summary = db.Column(db.Text)
@@ -122,8 +117,10 @@ class AnalysisReport(db.Model):
 
     # ChatGPT timing
     chatgpt_request_ms = db.Column(db.Float)
-    chatgpt_parse_ms = db.Column(db.Float)
-    chatgpt_total_ms = db.Column(db.Float)
+
+    # ChatGPT extra metadata persisted from AnalysisResult
+    chatgpt_temperature = db.Column(db.Float)
+    chatgpt_max_tokens = db.Column(db.Integer)
 
     # --- Groq Analysis Fields ---
     groq_summary = db.Column(db.Text)
@@ -138,8 +135,6 @@ class AnalysisReport(db.Model):
 
     # Groq timing
     groq_request_ms = db.Column(db.Float)
-    groq_parse_ms = db.Column(db.Float)
-    groq_total_ms = db.Column(db.Float)
 
     __table_args__ = (UniqueConstraint('user_id', 'transcript_id', 'analysis_date',
                                        name='_user_transcript_date_uc'),)

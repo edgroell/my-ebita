@@ -24,7 +24,7 @@ class AnalysisResult(BaseModel):
 
 class ChatGPTService:
     """
-    A service class to interact with OpenAI's ChatGPT models.
+    A service class to interact with OpenAI's ChatGPT models (e.g., chatgpt-4o-mini, chatgpt-4.1-mini or chatgpt-5-mini).
     Uses a prompting pattern that instructs the model to reason carefully (chain-of-thought internally)
     while returning a concise, structured JSON object (without exposing internal chain-of-thought).
     """
