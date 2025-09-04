@@ -98,6 +98,7 @@ class EarningsCallTranscript(db.Model):
     fiscal_quarter = db.Column(db.Integer, nullable=False)
     call_date = db.Column(db.DateTime)
     transcript_raw = db.Column(db.JSON, nullable=False)
+    transcript_split = db.Column(db.JSON, nullable=True)
     source_url = db.Column(db.String(1024))
 
     company = db.relationship("Company", back_populates="transcripts", lazy=True)
@@ -140,12 +141,14 @@ class AnalysisReport(db.Model):
     chatgpt_red_flags_identified = db.Column(db.JSON)
     chatgpt_raw_response_json = db.Column(db.JSON)
 
-    # ChatGPT timing
+    # ChatGPT timing + token/metadata
     chatgpt_request_ms = db.Column(db.Float)
-
-    # ChatGPT extra metadata persisted from AnalysisResult
+    chatgpt_model = db.Column(db.String(128))
     chatgpt_temperature = db.Column(db.Float)
     chatgpt_max_tokens = db.Column(db.Integer)
+    chatgpt_total_tokens = db.Column(db.Integer)
+    chatgpt_prompt_tokens = db.Column(db.Integer)
+    chatgpt_completion_tokens = db.Column(db.Integer)
 
     # --- Gemini Analysis Fields ---
     gemini_summary = db.Column(db.Text)
@@ -158,8 +161,14 @@ class AnalysisReport(db.Model):
     gemini_red_flags_identified = db.Column(db.JSON)
     gemini_raw_response_json = db.Column(db.JSON)
 
-    # Gemini timing
+    # Gemini timing + token/metadata
     gemini_request_ms = db.Column(db.Float)
+    gemini_model = db.Column(db.String(128))
+    gemini_temperature = db.Column(db.Float)
+    gemini_max_tokens = db.Column(db.Integer)
+    gemini_prompt_tokens = db.Column(db.Integer)
+    gemini_thoughts_tokens = db.Column(db.Integer)
+    gemini_candidates_tokens = db.Column(db.Integer)
 
     # --- Groq Analysis Fields ---
     groq_summary = db.Column(db.Text)
@@ -172,13 +181,16 @@ class AnalysisReport(db.Model):
     groq_red_flags_identified = db.Column(db.JSON)
     groq_raw_response_json = db.Column(db.JSON)
 
-    # Groq timing
+    # Groq timing + token/metadata
     groq_request_ms = db.Column(db.Float)
-
-    # Groq extra metadata persisted from AnalysisResult
+    groq_model = db.Column(db.String(128))
     groq_temperature = db.Column(db.Float)
     groq_max_tokens = db.Column(db.Integer)
+    groq_total_tokens = db.Column(db.Integer)
+    groq_prompt_tokens = db.Column(db.Integer)
+    groq_completion_tokens = db.Column(db.Integer)
 
+    # enforce uniqueness: one analysis report per user/transcript/date
     __table_args__ = (UniqueConstraint('user_id', 'transcript_id', 'analysis_date',
                                        name='_user_transcript_date_uc'),)
 

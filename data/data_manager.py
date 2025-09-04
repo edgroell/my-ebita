@@ -26,7 +26,9 @@ class DataManager:
         Returns the User object on success, None on error (e.g., username/email already exists).
         """
         try:
-            new_user = User(username=username, email=email)
+            new_user = User()
+            new_user.username = username
+            new_user.email = email
             new_user.set_password(password)
             self.db.session.add(new_user)
             self.db.session.commit()
@@ -108,11 +110,10 @@ class DataManager:
         Returns the Company object on success, None if ticker_symbol already exists or on error.
         """
         try:
-            new_company = Company(
-                ticker_symbol=ticker_symbol,
-                company_name=company_name,
-                logo_url=logo_url
-            )
+            new_company = Company()
+            new_company.ticker_symbol = ticker_symbol
+            new_company.company_name = company_name
+            new_company.logo_url = logo_url
             self.db.session.add(new_company)
             self.db.session.commit()
             return new_company
@@ -152,21 +153,24 @@ class DataManager:
     # --- Earnings Call Transcript Management ---
     def add_transcript(self, user_id: int, ticker_symbol: str, fiscal_year: int, fiscal_quarter: int,
                        call_date: Optional[datetime] , transcript_raw: Any,
-                       source_url: Optional[str] = None) -> Optional[EarningsCallTranscript]:
+                       source_url: Optional[str] = None,
+                       transcript_split: Optional[List[str]] = None,
+                       ) -> Optional[EarningsCallTranscript]:
         """
         Adds a new earnings call transcript associated with a specific user.
         Returns the Transcript object on success, None on error (e.g., duplicate entry).
         """
         try:
-            new_transcript = EarningsCallTranscript(
-                user_id=user_id,
-                ticker_symbol=ticker_symbol,
-                fiscal_year=fiscal_year,
-                fiscal_quarter=fiscal_quarter,
-                call_date=call_date,
-                transcript_raw=transcript_raw,
-                source_url=source_url
-            )
+            new_transcript = EarningsCallTranscript()
+            new_transcript.user_id = user_id
+            new_transcript.fiscal_year = fiscal_year
+            new_transcript.fiscal_quarter = fiscal_quarter
+            new_transcript.call_date = call_date
+            new_transcript.transcript_raw = transcript_raw
+            if transcript_split is not None:
+                new_transcript.transcript_split = transcript_split
+            new_transcript.source_url = source_url
+            new_transcript.ticker_symbol = ticker_symbol
             self.db.session.add(new_transcript)
             self.db.session.commit()
             return new_transcript
@@ -234,8 +238,10 @@ class DataManager:
             return False
 
     # --- Analysis Report Management ---
-    def create_analysis_report(self, user_id: int, transcript_id: int,
-                               gemini_summary: Optional[str] = None, gemini_concise_rationale: Optional[str] = None,
+    def create_analysis_report(self, user_id: int, 
+                               transcript_id: int,
+                               gemini_summary: Optional[str] = None, 
+                               gemini_concise_rationale: Optional[str] = None,
                                gemini_overall_sentiment: Optional[str] = None,
                                gemini_sentiment_scores_by_segment: Optional[Any] = None,
                                gemini_management_confidence_score: Optional[float] = None,
@@ -244,7 +250,12 @@ class DataManager:
                                gemini_red_flags_identified: Optional[Any] = None,
                                gemini_raw_response_json: Optional[Any] = None,
                                gemini_request_ms: Optional[float] = None,
-                               chatgpt_summary: Optional[str] = None, chatgpt_concise_rationale: Optional[str] = None,
+                               gemini_model: Optional[str] = None,
+                               gemini_prompt_tokens: Optional[int] = None,
+                               gemini_thoughts_tokens: Optional[int] = None,
+                               gemini_candidates_tokens: Optional[int] = None,
+                               chatgpt_summary: Optional[str] = None, 
+                               chatgpt_concise_rationale: Optional[str] = None,
                                chatgpt_overall_sentiment: Optional[str] = None,
                                chatgpt_sentiment_scores_by_segment: Optional[Any] = None,
                                chatgpt_management_confidence_score: Optional[float] = None,
@@ -253,7 +264,14 @@ class DataManager:
                                chatgpt_red_flags_identified: Optional[Any] = None,
                                chatgpt_raw_response_json: Optional[Any] = None,
                                chatgpt_request_ms: Optional[float] = None,
-                               groq_summary: Optional[str] = None, groq_concise_rationale: Optional[str] = None,
+                               chatgpt_model: Optional[str] = None,
+                               chatgpt_temperature: Optional[float] = None,
+                               chatgpt_max_tokens: Optional[int] = None,
+                               chatgpt_total_tokens: Optional[int] = None,
+                               chatgpt_prompt_tokens: Optional[int] = None,
+                               chatgpt_completion_tokens: Optional[int] = None,
+                               groq_summary: Optional[str] = None, 
+                               groq_concise_rationale: Optional[str] = None,
                                groq_overall_sentiment: Optional[str] = None,
                                groq_sentiment_scores_by_segment: Optional[Any] = None,
                                groq_management_confidence_score: Optional[float] = None,
@@ -261,7 +279,14 @@ class DataManager:
                                groq_key_topics_discussed: Optional[Any] = None,
                                groq_red_flags_identified: Optional[Any] = None,
                                groq_raw_response_json: Optional[Any] = None,
-                               groq_request_ms: Optional[float] = None) -> Optional[AnalysisReport]:
+                               groq_request_ms: Optional[float] = None,
+                               groq_model: Optional[str] = None,
+                               groq_temperature: Optional[float] = None,
+                               groq_max_tokens: Optional[int] = None,
+                               groq_total_tokens: Optional[int] = None,
+                               groq_prompt_tokens: Optional[int] = None,
+                               groq_completion_tokens: Optional[int] = None,
+                               ) -> Optional[AnalysisReport]:
         """
         Creates a new AI analysis report, storing results from ChatGPT, Gemini and Groq.
         Ensures the transcript belongs to the provided user_id.
@@ -276,46 +301,62 @@ class DataManager:
                 print(f"User {user_id} does not own transcript {transcript_id}; aborting report creation.")
                 return None
 
-            new_report = AnalysisReport(
-                user_id=user_id,
-                transcript_id=transcript_id,
+            new_report = AnalysisReport()
+            new_report.user_id = user_id
+            new_report.transcript_id = transcript_id
 
-                gemini_summary=gemini_summary,
-                gemini_concise_rationale=gemini_concise_rationale,
-                gemini_overall_sentiment=gemini_overall_sentiment,
-                gemini_sentiment_scores_by_segment=gemini_sentiment_scores_by_segment,
-                gemini_management_confidence_score=gemini_management_confidence_score,
-                gemini_evasiveness_score_q_a=gemini_evasiveness_score_q_a,
-                gemini_key_topics_discussed=gemini_key_topics_discussed,
-                gemini_red_flags_identified=gemini_red_flags_identified,
-                gemini_raw_response_json=gemini_raw_response_json,
+            new_report.chatgpt_summary = chatgpt_summary
+            new_report.chatgpt_concise_rationale = chatgpt_concise_rationale
+            new_report.chatgpt_overall_sentiment = chatgpt_overall_sentiment
+            new_report.chatgpt_sentiment_scores_by_segment = chatgpt_sentiment_scores_by_segment
+            new_report.chatgpt_management_confidence_score = chatgpt_management_confidence_score
+            new_report.chatgpt_evasiveness_score_q_a = chatgpt_evasiveness_score_q_a
+            new_report.chatgpt_key_topics_discussed = chatgpt_key_topics_discussed
+            new_report.chatgpt_red_flags_identified = chatgpt_red_flags_identified
+            new_report.chatgpt_raw_response_json = chatgpt_raw_response_json
 
-                gemini_request_ms=gemini_request_ms,
+            new_report.chatgpt_request_ms = chatgpt_request_ms
+            new_report.chatgpt_model = chatgpt_model
+            new_report.chatgpt_temperature = chatgpt_temperature
+            new_report.chatgpt_max_tokens = chatgpt_max_tokens
+            new_report.chatgpt_total_tokens = chatgpt_total_tokens
+            new_report.chatgpt_prompt_tokens = chatgpt_prompt_tokens
+            new_report.chatgpt_completion_tokens = chatgpt_completion_tokens
 
-                chatgpt_summary=chatgpt_summary,
-                chatgpt_concise_rationale=chatgpt_concise_rationale,
-                chatgpt_overall_sentiment=chatgpt_overall_sentiment,
-                chatgpt_sentiment_scores_by_segment=chatgpt_sentiment_scores_by_segment,
-                chatgpt_management_confidence_score=chatgpt_management_confidence_score,
-                chatgpt_evasiveness_score_q_a=chatgpt_evasiveness_score_q_a,
-                chatgpt_key_topics_discussed=chatgpt_key_topics_discussed,
-                chatgpt_red_flags_identified=chatgpt_red_flags_identified,
-                chatgpt_raw_response_json=chatgpt_raw_response_json,
+            new_report.gemini_summary = gemini_summary
+            new_report.gemini_concise_rationale = gemini_concise_rationale
+            new_report.gemini_overall_sentiment = gemini_overall_sentiment
+            new_report.gemini_sentiment_scores_by_segment = gemini_sentiment_scores_by_segment
+            new_report.gemini_management_confidence_score = gemini_management_confidence_score
+            new_report.gemini_evasiveness_score_q_a = gemini_evasiveness_score_q_a
+            new_report.gemini_key_topics_discussed = gemini_key_topics_discussed
+            new_report.gemini_red_flags_identified = gemini_red_flags_identified
+            new_report.gemini_raw_response_json = gemini_raw_response_json
 
-                chatgpt_request_ms=chatgpt_request_ms,
+            new_report.gemini_request_ms = gemini_request_ms
+            new_report.gemini_model = gemini_model
+            new_report.gemini_prompt_tokens = gemini_prompt_tokens
+            new_report.gemini_thoughts_tokens = gemini_thoughts_tokens
+            new_report.gemini_candidates_tokens = gemini_candidates_tokens
 
-                groq_summary=groq_summary,
-                groq_concise_rationale=groq_concise_rationale,
-                groq_overall_sentiment=groq_overall_sentiment,
-                groq_sentiment_scores_by_segment=groq_sentiment_scores_by_segment,
-                groq_management_confidence_score=groq_management_confidence_score,
-                groq_evasiveness_score_q_a=groq_evasiveness_score_q_a,
-                groq_key_topics_discussed=groq_key_topics_discussed,
-                groq_red_flags_identified=groq_red_flags_identified,
-                groq_raw_response_json=groq_raw_response_json,
+            new_report.groq_summary = groq_summary
+            new_report.groq_concise_rationale = groq_concise_rationale
+            new_report.groq_overall_sentiment = groq_overall_sentiment
+            new_report.groq_sentiment_scores_by_segment = groq_sentiment_scores_by_segment
+            new_report.groq_management_confidence_score = groq_management_confidence_score
+            new_report.groq_evasiveness_score_q_a = groq_evasiveness_score_q_a
+            new_report.groq_key_topics_discussed = groq_key_topics_discussed
+            new_report.groq_red_flags_identified = groq_red_flags_identified
+            new_report.groq_raw_response_json = groq_raw_response_json
 
-                groq_request_ms=groq_request_ms,
-            )
+            new_report.groq_request_ms = groq_request_ms
+            new_report.groq_model = groq_model
+            new_report.groq_temperature = groq_temperature
+            new_report.groq_max_tokens = groq_max_tokens
+            new_report.groq_total_tokens = groq_total_tokens
+            new_report.groq_prompt_tokens = groq_prompt_tokens
+            new_report.groq_completion_tokens = groq_completion_tokens
+            
             self.db.session.add(new_report)
             self.db.session.commit()
             return new_report
