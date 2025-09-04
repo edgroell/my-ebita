@@ -185,6 +185,7 @@ class NinjasService:
 if __name__ == "__main__":
     import os
     from dotenv import load_dotenv
+    
     load_dotenv()
 
     API_NINJAS_KEY = os.getenv('API_NINJAS_KEY')
@@ -194,13 +195,13 @@ if __name__ == "__main__":
     else:
         ninjas_service = NinjasService(api_key=API_NINJAS_KEY)
 
-        # --- Test Case 1: Fetch a known transcript (e.g., Microsoft Q2 2025) ---
-        print("\n--- Testing fetching Microsoft Q2 2025 transcript (with split confirmation) ---")
+        # --- Test Case 1: Fetch a known transcript (e.g., Microsoft Q3 2025) ---
+        print("\n--- Testing fetching Microsoft Q3 2025 transcript (with split confirmation) ---")
         try:
-            msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2025, quarter=2)
+            msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2025, quarter=3)
             if msft_transcript:
                 print(f"MSFT Transcript Date: {msft_transcript['date']}\n")
-                print(f"MSFT Transcript (first 500 chars): {msft_transcript['transcript'][:500]}...\n")
+                print(f"MSFT Transcript: {msft_transcript['transcript']}...\n")
                 if msft_transcript['transcript_split']:
                     print(
                         f"Transcript Split Detected! First 3 segments:\n{json.dumps(msft_transcript['transcript_split'][:3], indent=2)}\n")
