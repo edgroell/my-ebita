@@ -199,12 +199,13 @@ if __name__ == "__main__":
         print("\n--- Testing fetching Microsoft Q3 2025 transcript (with split confirmation) ---")
         try:
             msft_transcript = ninjas_service.get_earnings_transcript(ticker="MSFT", year=2025, quarter=3)
+            print(msft_transcript)
             if msft_transcript:
                 print(f"MSFT Transcript Date: {msft_transcript['date']}\n")
                 print(f"MSFT Transcript: {msft_transcript['transcript']}...\n")
                 if msft_transcript['transcript_split']:
                     print(
-                        f"Transcript Split Detected! First 3 segments:\n{json.dumps(msft_transcript['transcript_split'][:3], indent=2)}\n")
+                        f"Transcript Split Detected!:\n{json.dumps(msft_transcript['transcript_split'], indent=2)}\n")
                 else:
                     print("Transcript Split NOT detected!")
             else:
