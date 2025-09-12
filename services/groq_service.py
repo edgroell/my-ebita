@@ -26,8 +26,6 @@ class AnalysisResult(BaseModel):
     structured_output: StructuredOutput = StructuredOutput()
     request_time_ms: float = 0.00
     model: str = ""
-    temperature: float = 0.0
-    max_tokens: int = 0
     total_tokens: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -51,8 +49,6 @@ class GroqService:
     def analyze_transcript(
         self,
         transcript_text: str,
-        temperature: float = 0.3,
-        max_completion_tokens: int = 1000,
         structured_output_cls: type[StructuredOutput] = StructuredOutput,
         analysis_result_cls: type[AnalysisResult] = AnalysisResult
     ) -> AnalysisResult:
@@ -74,7 +70,7 @@ class GroqService:
         )
 
         user_instructions = (
-            f"Here is an earnings call transcript:\n\n---\n{transcript_text}\n---\n\n"
+            "As context, you are provided with chunks or all of an earnings call transcript. "
             'Based on the transcript, try to return a structured output with these keys: '
             '"summary" (string, 3-5 sentences providing a brief overview of the key points), '
             '"concise_rationale" (string, 1-2 sentences explaining the key reasons for your conclusions), '
@@ -94,7 +90,7 @@ class GroqService:
 
         messages_instructions = [
             {"role": "system", "content": system_instructions},
-            {"role": "user", "content": user_instructions},
+            {"role": "user", "content": f"Context:\n{transcript_text}\n\nQuestion:\n{user_instructions}"},
         ]
 
         request_elapsed = None
@@ -103,8 +99,6 @@ class GroqService:
         params = {
             "model": self.model_name,
             "messages": messages_instructions,  # type: ignore
-            "temperature": temperature,
-            "max_tokens": max_completion_tokens,
         }
 
         try:
@@ -120,15 +114,19 @@ class GroqService:
             )
 
             analysis_content = None
+            raw_content = None
             try:
-                analysis_content = StructuredOutput.model_validate(json.loads(completion.choices[0].message.content))
-                model_used = completion.choices[0].message.model
-                temperature_used = completion.choices[0].message.temperature
-                total_tokens = completion.choices[0].message.total_tokens
-                prompt_tokens = completion.choices[0].message.prompt_tokens
-                completion_tokens = completion.choices[0].message.completion_tokens
+                raw_content = completion.choices[0].message.content
+                print(raw_content)
+                analysis_content = structured_output_cls.model_validate(json.loads(raw_content))
+                model_used = getattr(completion, "model", self.model_name)
+                total_tokens = getattr(completion.usage, "total_tokens", None)
+                prompt_tokens = getattr(completion.usage, "prompt_tokens", None)
+                completion_tokens = getattr(completion.usage, "completion_tokens", None)
             except Exception as parse_exc:
-                raise ValueError(f"Failed to parse structured response: {parse_exc}") from parse_exc
+                raise ValueError(
+                    f"Failed to parse structured response: {parse_exc}\nRaw content: {raw_content}"
+                ) from parse_exc
 
             if analysis_content is None:
                 raise ValueError("Received None for analysis_content.")
@@ -141,8 +139,6 @@ class GroqService:
                     structured_output=analysis_content,
                     request_time_ms=request_elapsed,
                     model=model_used or "",
-                    temperature=(float(temperature_used) if temperature_used is not None else float(temperature)),
-                    max_tokens=max_completion_tokens,
                     total_tokens=(int(total_tokens) if total_tokens is not None else 0),
                     prompt_tokens=(int(prompt_tokens) if prompt_tokens is not None else 0),
                     completion_tokens=(int(completion_tokens) if completion_tokens is not None else 0),
@@ -152,8 +148,6 @@ class GroqService:
                     structured_output=analysis_content,
                     request_time_ms=request_elapsed,
                     model=model_used or "",
-                    temperature=(float(temperature_used) if temperature_used is not None else float(temperature)),
-                    max_tokens=max_completion_tokens,
                     total_tokens=(int(total_tokens) if total_tokens is not None else 0),
                     prompt_tokens=(int(prompt_tokens) if prompt_tokens is not None else 0),
                     completion_tokens=(int(completion_tokens) if completion_tokens is not None else 0),
@@ -240,8 +234,6 @@ if __name__ == "__main__":
         try:
             analysis_result = groq_analyzer.analyze_transcript(
                 transcript_text=test_transcript,
-                temperature=1.0,
-                max_completion_tokens=1000,
             )
         except Exception as exc:
             print("analyze_transcript raised an exception:", exc)
@@ -258,12 +250,11 @@ if __name__ == "__main__":
                     f"\nSummary: {analysis_result.structured_output.summary}"
                     f"\nRationale: {analysis_result.structured_output.concise_rationale}"
                     f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
+                    f"\nTEST: {analysis_result.structured_output.key_metrics}"
                     f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
                     f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
                     f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
                     f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
-                    f"\nTemperature: {analysis_result.temperature}"
-                    f"\nMax Tokens: {analysis_result.max_tokens}"
                     f"\nTotal Tokens: {analysis_result.total_tokens}"
                     f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
                     f"\nCompletion Tokens: {analysis_result.completion_tokens}"

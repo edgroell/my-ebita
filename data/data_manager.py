@@ -240,21 +240,7 @@ class DataManager:
     # --- Analysis Report Management ---
     def create_analysis_report(self, user_id: int, 
                                transcript_id: int,
-                               gemini_summary: Optional[str] = None, 
-                               gemini_concise_rationale: Optional[str] = None,
-                               gemini_overall_sentiment: Optional[str] = None,
-                               gemini_sentiment_scores_by_segment: Optional[Any] = None,
-                               gemini_management_confidence_score: Optional[float] = None,
-                               gemini_evasiveness_score_q_a: Optional[float] = None,
-                               gemini_key_topics_discussed: Optional[Any] = None,
-                               gemini_red_flags_identified: Optional[Any] = None,
-                               gemini_raw_response_json: Optional[Any] = None,
-                               gemini_request_ms: Optional[float] = None,
-                               gemini_model: Optional[str] = None,
-                               gemini_prompt_tokens: Optional[int] = None,
-                               gemini_thoughts_tokens: Optional[int] = None,
-                               gemini_candidates_tokens: Optional[int] = None,
-                               chatgpt_summary: Optional[str] = None, 
+                                chatgpt_summary: Optional[str] = None, 
                                chatgpt_concise_rationale: Optional[str] = None,
                                chatgpt_overall_sentiment: Optional[str] = None,
                                chatgpt_sentiment_scores_by_segment: Optional[Any] = None,
@@ -270,6 +256,20 @@ class DataManager:
                                chatgpt_total_tokens: Optional[int] = None,
                                chatgpt_prompt_tokens: Optional[int] = None,
                                chatgpt_completion_tokens: Optional[int] = None,
+                               gemini_summary: Optional[str] = None, 
+                               gemini_concise_rationale: Optional[str] = None,
+                               gemini_overall_sentiment: Optional[str] = None,
+                               gemini_sentiment_scores_by_segment: Optional[Any] = None,
+                               gemini_management_confidence_score: Optional[float] = None,
+                               gemini_evasiveness_score_q_a: Optional[float] = None,
+                               gemini_key_topics_discussed: Optional[Any] = None,
+                               gemini_red_flags_identified: Optional[Any] = None,
+                               gemini_raw_response_json: Optional[Any] = None,
+                               gemini_request_ms: Optional[float] = None,
+                               gemini_model: Optional[str] = None,
+                               gemini_prompt_tokens: Optional[int] = None,
+                               gemini_thoughts_tokens: Optional[int] = None,
+                               gemini_candidates_tokens: Optional[int] = None,
                                groq_summary: Optional[str] = None, 
                                groq_concise_rationale: Optional[str] = None,
                                groq_overall_sentiment: Optional[str] = None,
@@ -281,8 +281,6 @@ class DataManager:
                                groq_raw_response_json: Optional[Any] = None,
                                groq_request_ms: Optional[float] = None,
                                groq_model: Optional[str] = None,
-                               groq_temperature: Optional[float] = None,
-                               groq_max_tokens: Optional[int] = None,
                                groq_total_tokens: Optional[int] = None,
                                groq_prompt_tokens: Optional[int] = None,
                                groq_completion_tokens: Optional[int] = None,
@@ -351,8 +349,6 @@ class DataManager:
 
             new_report.groq_request_ms = groq_request_ms
             new_report.groq_model = groq_model
-            new_report.groq_temperature = groq_temperature
-            new_report.groq_max_tokens = groq_max_tokens
             new_report.groq_total_tokens = groq_total_tokens
             new_report.groq_prompt_tokens = groq_prompt_tokens
             new_report.groq_completion_tokens = groq_completion_tokens

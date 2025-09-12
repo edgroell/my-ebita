@@ -94,7 +94,7 @@ class ChatGPTService:
         )
 
         user_instructions = (
-            f"Here is an earnings call transcript:\n\n---\n{transcript_text}\n---\n\n"
+            "As context, you are provided with chunks or all of an earnings call transcript. "
             'Based on the transcript, try to return a structured output with these keys: '
             '"summary" (string, 3-5 sentences providing a brief overview of the key points), '
             '"concise_rationale" (string, 1-2 sentences explaining the key reasons for your conclusions), '
@@ -114,7 +114,7 @@ class ChatGPTService:
 
         messages_instructions = [
             {"role": "system", "content": system_instructions},
-            {"role": "user", "content": user_instructions},
+            {"role": "user", "content": f"Context:\n{transcript_text}\n\nQuestion:\n{user_instructions}"},
         ]
 
         request_elapsed = None

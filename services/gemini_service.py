@@ -66,7 +66,7 @@ class GeminiService:
             "When analyzing, internally reason step-by-step to improve accuracy (chain-of-thought). "
             "DO NOT reveal detailed internal chain-of-thought or step-by-step working in the output. "
             "Include a very short 1-2 sentence 'concise_rationale' explaining the key reasons for your conclusions."
-            f"Here is an earnings call transcript:\n\n---\n{transcript_text}\n---\n\n"
+            "As context, you are provided with chunks or all of an earnings call transcript. "
             'Based on the transcript, try to return a structured output with these keys: '
             '"summary" (string, 3-5 sentences providing a brief overview of the key points), '
             '"concise_rationale" (string, 1-2 sentences explaining the key reasons for your conclusions), '
@@ -82,6 +82,7 @@ class GeminiService:
             '"key_topics" (array of 3-5 strings, highlighting the main topics discussed), '
             '"red_flags" (array of 3-5 strings, noting any potential concerns raised). '
             "Do NOT include any extraneous text or internal reasoning. Ensure the structured output is well-formed."
+            f"Here is the context:\n\n{transcript_text}"
         )
 
         request_elapsed = None

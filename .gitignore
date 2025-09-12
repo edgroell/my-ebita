@@ -6,3 +6,4 @@ data/__pycache__/
 services/__pycache__/
 typings/
 .hintrc
+data/chroma_langchain_db/
