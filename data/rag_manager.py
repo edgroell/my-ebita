@@ -8,9 +8,11 @@ from typing import List, Dict, Any
 class RAGManager:
     """
     Manages the RAG (Retrieval-Augmented Generation) process using LangChain.
-    - Initialize with a vector store and LLM
-    - add_texts to add document chunks to the vector store
-    - run_qa to perform a retrieval-augmented generation query
+    - Splits transcripts into chunks based on 'Operator:' lines.
+    - Adds chunks to the vector store.
+    - Retrieves relevant chunks for a query.
+    - Builds context text from retrieved chunks.
+    - Interacts with a vector store (Chroma via LangChain).
     """
 
     def __init__(self, vector_store: Any):
