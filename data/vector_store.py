@@ -48,9 +48,9 @@ class ChromaVectorStore:
             raise RuntimeError("Chroma vector store is not initialized; ensure Chroma and embeddings were created successfully.")
         return self._store.similarity_search(query, k=k, **kwargs)
 
-    def query(self, collection_name: Optional[str] = None, query: str = "", top_k: int = 4, **kwargs) -> Any:
+    def query(self, collection_name: Optional[str] = "transcripts", query: str = "", top_k: int = 5, **kwargs) -> Any:
         """
         Perform a similarity search and return results in a dict format.
         """
-        results = self.similarity_search(query=query, k=top_k, **kwargs)
+        results = self.similarity_search(collection=collection_name, query=query, k=top_k, **kwargs)
         return {"results": results}
