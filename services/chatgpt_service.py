@@ -68,6 +68,34 @@ class ChatGPTService:
             return "max_completion_tokens"
         return "max_tokens"
 
+    def call_agent(self, messages: list[dict[str, str]], temperature: float = 0.3, max_completion_tokens: int = 1000) -> str:
+        """
+        Sends a list of messages to the ChatGPT model and returns the raw response.
+        Each message should be a dictionary with 'role' and 'content' keys.
+        """
+        if not messages or not isinstance(messages, list):
+            raise ValueError("Parameter messages must be a non-empty list of message dictionaries.")
+
+        temp_param = self._temp_param_number(temperature)
+        token_param = self._token_param_name()
+        params = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": temp_param,
+            token_param: max_completion_tokens,
+        }
+
+        try:
+            completion = self.client.chat.completions.create(**params)
+            response = completion.choices[0].message.content.strip()
+            return response
+
+        except OpenAIError as oe:
+            raise ValueError(f"Failed to get response from ChatGPT: {oe}")
+
+        except Exception as e:
+            raise ValueError(f"An unexpected error occurred: {e}")
+
     def analyze_transcript(
         self,
         transcript_text: str,

@@ -1,8 +1,28 @@
 # RAG (Retrieval-Augmented Generation) with LangChain
 
+import sys
+from pathlib import Path
 import os
 import re
 from typing import List, Dict, Any
+
+from dotenv import load_dotenv
+
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from services.chatgpt_service import ChatGPTService
+
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+chatgpt_service = None
+if not OPENAI_API_KEY:
+    print("Warning: OPENAI_API_KEY environment variable not set; ChatGPTService disabled for testing.")
+else:
+    chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY, model_name="gpt-5-mini")
 
 
 class RAGManager:
@@ -17,6 +37,42 @@ class RAGManager:
 
     def __init__(self, vector_store: Any):
         self.vector_store = vector_store
+
+    def _summarize_executive_overview(self, executive_overview: str) -> str:
+        """
+        Requests agent to summarize the executive overview section of the transcript.
+
+        Args:
+            executive_overview (str): The executive overview section to summarize.
+
+        Returns:
+            str: The summarized executive overview. If no summary is found, returns the original text.
+        """
+        user_instructions = (
+            "As context, you are provided with the executive overview section of an earnings call transcript. "
+            "Please provide a summary of this section, containing all the most important points. "
+            "This summary will be a chunk used for retrieval in a RAG system, hence it should be more or less 1000 tokens."
+        )
+        
+        if chatgpt_service is None:
+            print("Warning: chatgpt_service is not available; returning original executive overview.")
+            return executive_overview
+
+        try:
+            response = chatgpt_service.call_agent(
+                messages=[
+                    {"role": "system", "content": "You are a financial analyst AI specializing in dissecting earnings call transcripts."},
+                    {"role": "user", "content": f"Context:\n{executive_overview}\n\nQuestion:\n{user_instructions}"}
+                ],
+                max_completion_tokens=2500
+            )
+        except Exception as exc:
+            print("Warning: chatgpt_service.call_agent failed:", exc)
+            return executive_overview
+
+        summarized_executive_overview = response
+
+        return summarized_executive_overview if summarized_executive_overview else executive_overview
 
     def split_transcript(self, full_transcript: List[Dict[str, Any]]) -> list[str]:
         """
@@ -48,14 +104,17 @@ class RAGManager:
             all_splits.append(transcript[start_index:end_index].strip())
         
         cleaned_splits = [split for split in all_splits if split]
-
+        
+        summarized_executive_overview = self._summarize_executive_overview(cleaned_splits[0])
+        cleaned_splits[0] = summarized_executive_overview
+        
         return cleaned_splits
     
     def add_texts(self, texts: List[str]) -> List[str]:
         """Add texts to the vector store."""
         return self.vector_store.add_texts(texts=texts)
 
-    def retrieve_context(self, query: str, top_k: int = 5) -> List[Any]:
+    def retrieve_context(self, query: str, top_k: int = 3) -> List[Any]:
         """Retrieve top-k similar chunks for the query."""
         return self.vector_store.similarity_search(query=query, k=top_k)
     
@@ -66,23 +125,11 @@ class RAGManager:
 
 # TESTING
 if __name__ == "__main__":
-    import os
-    import sys
-    from pathlib import Path
-    from dotenv import load_dotenv
-
-    project_root = Path(__file__).resolve().parents[1]
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-
     from vector_store import ChromaVectorStore
     from services.chatgpt_service import ChatGPTService
     from services.gemini_service import GeminiService
     from services.groq_service import GroqService
 
-    load_dotenv()
-
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -145,50 +192,50 @@ if __name__ == "__main__":
     print("Building Context Text...")
     test_transcript = rag_manager.build_context_text(retrieved_docs)
     print(f"Context Text Length: {len(test_transcript)} characters")
-
     # --- Testing with ChatGPTService ---
-
-    # if not OPENAI_API_KEY:
-    #     print("Error: OPENAI_API_KEY environment variable not set for testing.")
-    # else:
-    #     chatgpt_analyzer = ChatGPTService(api_key=OPENAI_API_KEY, model_name="gpt-5-mini")
-    #     print(f"--- Testing ChatGPTService with {chatgpt_analyzer.model_name} ---")
-
-    #     try:
-    #         analysis_result = chatgpt_analyzer.analyze_transcript(
-    #             transcript_text=test_transcript,
-    #             temperature=1.0,
-    #             max_completion_tokens=1000,
-    #         )
-    #     except Exception as exc:
-    #         print("analyze_transcript raised an exception:", exc)
-    #         analysis_result = None
-
-    #     print("analyze_transcript returned (or failed) -> continue to result handling")
-
-    #     if analysis_result is None:
-    #         print("No analysis_result object (call failed).")
-    #     else:
-    #         try:
-    #             print(
-    #                 f"\n--- ChatGPT Analysis {analysis_result.model} executed in {analysis_result.request_time_ms:.2f} ms ---"
-    #                 f"\nSummary: {analysis_result.structured_output.summary}"
-    #                 f"\nRationale: {analysis_result.structured_output.concise_rationale}"
-    #                 f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
-    #                 f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
-    #                 f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
-    #                 f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
-    #                 f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
-    #                 f"\nTemperature: {analysis_result.temperature}"
-    #                 f"\nMax Tokens: {analysis_result.max_tokens}"
-    #                 f"\nTotal Tokens: {analysis_result.total_tokens}"
-    #                 f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
-    #                 f"\nCompletion Tokens: {analysis_result.completion_tokens}"
-    #             )
-    #             print("\n--- Full Analysis Result ---")
-    #             print(analysis_result)
-    #         except Exception as exc:
-    #             print("Failed to print analysis result:", exc)
+    
+    if chatgpt_service is None:
+        print("Skipping ChatGPTService tests because OPENAI_API_KEY is not set.")
+        analysis_result = None
+    else:
+        print(f"--- Testing ChatGPTService with {chatgpt_service.model_name} ---")
+    
+        try:
+            analysis_result = chatgpt_service.analyze_transcript(
+                transcript_text=test_transcript,
+                temperature=1.0,
+                max_completion_tokens=1000,
+            )
+        except Exception as exc:
+            print("analyze_transcript raised an exception:", exc)
+            analysis_result = None
+    
+        print("analyze_transcript returned (or failed) -> continue to result handling")
+    
+    if analysis_result is None:
+        print("No analysis_result object (call failed).")
+    else:
+        try:
+            print(
+                f"\n--- ChatGPT Analysis {analysis_result.model} executed in {analysis_result.request_time_ms:.2f} ms ---"
+                f"\nSummary: {analysis_result.structured_output.summary}"
+                f"\nRationale: {analysis_result.structured_output.concise_rationale}"
+                f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
+                f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
+                f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
+                f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
+                f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
+                f"\nTemperature: {analysis_result.temperature}"
+                f"\nMax Tokens: {analysis_result.max_tokens}"
+                f"\nTotal Tokens: {analysis_result.total_tokens}"
+                f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
+                f"\nCompletion Tokens: {analysis_result.completion_tokens}"
+            )
+            print("\n--- Full Analysis Result ---")
+            print(analysis_result)
+        except Exception as exc:
+            print("Failed to print analysis result:", exc)
+            print("Failed to print analysis result:", exc)
 
     # --- Testing with GeminiService ---
 
@@ -232,45 +279,45 @@ if __name__ == "__main__":
 
     # --- Testing with GroqService ---
 
-    analysis_result = None
+    # analysis_result = None
 
-    if not GROQ_API_KEY:
-        print("Error: GROQ_API_KEY environment variable not set for testing.")
-    else:
-        groq_analyzer = GroqService(api_key=GROQ_API_KEY, model_name="openai/gpt-oss-120b")
-        print(f"--- Testing GroqService with {groq_analyzer.model_name} ---")
+    # if not GROQ_API_KEY:
+    #     print("Error: GROQ_API_KEY environment variable not set for testing.")
+    # else:
+    #     groq_analyzer = GroqService(api_key=GROQ_API_KEY, model_name="openai/gpt-oss-120b")
+    #     print(f"--- Testing GroqService with {groq_analyzer.model_name} ---")
 
-        try:
-            analysis_result = groq_analyzer.analyze_transcript(
-                transcript_text=test_transcript,
-            )
-        except Exception as exc:
-            print("analyze_transcript raised an exception:", exc)
-            analysis_result = None
+    #     try:
+    #         analysis_result = groq_analyzer.analyze_transcript(
+    #             transcript_text=test_transcript,
+    #         )
+    #     except Exception as exc:
+    #         print("analyze_transcript raised an exception:", exc)
+    #         analysis_result = None
 
-        print("analyze_transcript returned (or failed) -> continue to result handling")
+    #     print("analyze_transcript returned (or failed) -> continue to result handling")
 
-        if analysis_result is None:
-            print("No analysis_result object (call failed).")
-        else:
-            try:
-                print(
-                    f"\n--- ChatGPT Analysis {analysis_result.model} executed in {analysis_result.request_time_ms:.2f} ms ---"
-                    f"\nSummary: {analysis_result.structured_output.summary}"
-                    f"\nRationale: {analysis_result.structured_output.concise_rationale}"
-                    f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
-                    f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
-                    f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
-                    f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
-                    f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
-                    f"\nTotal Tokens: {analysis_result.total_tokens}"
-                    f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
-                    f"\nCompletion Tokens: {analysis_result.completion_tokens}"
-                )
-                print("\n--- Full Analysis Result ---")
-                print(analysis_result)
-            except Exception as exc:
-                print("Failed to print analysis result:", exc)
+    #     if analysis_result is None:
+    #         print("No analysis_result object (call failed).")
+    #     else:
+    #         try:
+    #             print(
+    #                 f"\n--- ChatGPT Analysis {analysis_result.model} executed in {analysis_result.request_time_ms:.2f} ms ---"
+    #                 f"\nSummary: {analysis_result.structured_output.summary}"
+    #                 f"\nRationale: {analysis_result.structured_output.concise_rationale}"
+    #                 f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
+    #                 f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
+    #                 f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
+    #                 f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
+    #                 f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
+    #                 f"\nTotal Tokens: {analysis_result.total_tokens}"
+    #                 f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
+    #                 f"\nCompletion Tokens: {analysis_result.completion_tokens}"
+    #             )
+    #             print("\n--- Full Analysis Result ---")
+    #             print(analysis_result)
+    #         except Exception as exc:
+    #             print("Failed to print analysis result:", exc)
 
 
 
