@@ -9,4 +9,5 @@ services_data/__pycache__/
 typings/
 .hintrc
 data/chroma_langchain_db/
+data/transcripts_db/
 logs/

@@ -1,918 +1,1183 @@
-# TODO remove TESTING blocks?
 """
-My EBITA - An AI Financial Sidekick
+My EBITA* - An AI Financial Sidekick
 *EBITA: Earnings Beat Indicator & Text Analyzer
 by Ed Groell
-Latest: 22-AUG-2025
+Latest: 22-OCT-2025
 """
 
 import os
-from flask import Flask, render_template, Response, request, jsonify, redirect, url_for, flash, make_response
+from flask import Flask, render_template, Response, request, jsonify, redirect, url_for, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from datetime import datetime, date
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
+import logging
+from logging.handlers import RotatingFileHandler
+from functools import wraps
+import concurrent.futures
+import time
+from threading import Thread
+from flask_swagger_ui import get_swaggerui_blueprint
 
 # Importing database and data manager
-from data.data_models import db, User, Company, EarningsCallTranscript, AnalysisReport
+from data.data_models import db, EarningsCallTranscript, User
 from data.data_manager import DataManager
 
-# Importing AI services
-from services.gemini_service import GeminiService
-from services.chatgpt_service import ChatGPTService
-from services.ninjas_service import NinjasService
-from services.groq_service import GroqService
-from services.analysis_result import AnalysisResult
-import logging
+# Import AI components
+from services_ai.rag_manager import RAGManager
+from services_ai.vector_store import ChromaVectorStore
+from services_ai.agentic_bot import AgenticBot  # This is correct
+
+# Import API services
+from services_api.ninjas_service import NinjasService
+from services_api.chatgpt_service import ChatGPTService
+from services_api.gemini_service import GeminiService
+from services_api.groq_service import GroqService
+
 from dotenv import load_dotenv
 
 # --- Load environment variables ---
 load_dotenv()
 
-# Default prompt parameters
-DEFAULT_ANALYSIS_PROMPT = "return an analysis as per the following requirements"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
-DEFAULT_CHATGPT_MODEL = "gpt-4.1-mini"
+# Default model configurations
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_CHATGPT_MODEL = "gpt-4o-mini"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
-DEFAULT_MAX_TOKENS = 2500
-DEFAULT_TEMPERATURE = 0.8
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
 # --- Flask Configuration ---
-app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'data', 'my_ebita.db')
+
+# Session configuration for auto-logout
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)  # Auto-logout after 2 hours of inactivity
+app.config['SESSION_COOKIE_SECURE'] = not app.debug  # HTTPS only in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+
+# Ensure database directory exists
+db_dir = os.path.join(basedir, 'data', 'transcripts_db')
+os.makedirs(db_dir, exist_ok=True)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(db_dir, 'transcripts.sqlite3')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- Initialize Extensions ---
+# --- Logging Configuration ---
+if not app.debug:
+    # Create logs directory
+    log_dir = os.path.join(basedir, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Setup file handler with rotation
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, 'ebita.log'),
+        maxBytes=10240000,  # 10MB
+        backupCount=10
+    )
+    file_handler.setFormatter(logging.Formatter(
+        '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('EBITA startup')
+else:
+    # Console logging in debug mode
+    app.logger.setLevel(logging.DEBUG)
+    app.logger.info('EBITA startup (DEBUG mode)')
+
+# Initialize extensions
 db.init_app(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
-setattr(login_manager, 'login_view', 'login')  # The name of the view function for the login page
-setattr(login_manager, 'login_message', "Please log in to access this page.")
+login_manager.login_view = 'login' #type: ignore
+login_manager.login_message = "Please log in to access this page." #type: ignore
 
-# --- Initialize Data Manager and External Services ---
-data_manager = DataManager(db) # Initialize DataManager here
+# --- Rate Limiting Configuration ---
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+    strategy="fixed-window"
+)
 
-# Get API keys from environment variables
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") # Assuming GOOGLE_API_KEY for Gemini
+# --- Initialize Core Services ---
+data_manager = DataManager(db)
+
+# Initialize API Services
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 API_NINJAS_KEY = os.environ.get("API_NINJAS_KEY")
 
-# Initialize AI services (handle cases where API keys might be missing)
-gemini_service = None
-if GEMINI_API_KEY:
-    gemini_service = GeminiService(api_key=GEMINI_API_KEY, default_model=DEFAULT_GEMINI_MODEL)
-else:
-    print("Warning: GOOGLE_API_KEY not set. GeminiService will not be available.")
+# Create ChatGPT service first (used by both RAG and analysis)
+chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY, model_name=DEFAULT_CHATGPT_MODEL) if OPENAI_API_KEY else None
 
-chatgpt_service = None
-if OPENAI_API_KEY:
-    chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY, model_name=DEFAULT_CHATGPT_MODEL)
-else:
-    print("Warning: OPENAI_API_KEY not set. ChatGPTService will not be available.")
+# Initialize other services
+ninjas_service = NinjasService(api_key=API_NINJAS_KEY) if API_NINJAS_KEY else None
+gemini_service = GeminiService(api_key=GEMINI_API_KEY, model_name=DEFAULT_GEMINI_MODEL) if GEMINI_API_KEY else None
+groq_service = GroqService(api_key=GROQ_API_KEY, model_name=DEFAULT_GROQ_MODEL) if GROQ_API_KEY else None
 
-groq_service = None
-if GROQ_API_KEY:
-    groq_service = GroqService(api_key=GROQ_API_KEY, default_model=DEFAULT_GROQ_MODEL)
-else:
-    print("Warning: GROQ_API_KEY not set. GroqService will not be available.")
+# Initialize Vector Store and RAG Manager (reusing chatgpt_service)
+vector_store = None
+rag_manager = None
+try:
+    vector_store = ChromaVectorStore()
+    rag_manager = RAGManager(
+        vector_store=vector_store,
+        chatgpt_service=chatgpt_service
+    )
+    app.logger.info("RAG Manager initialized successfully")
+except Exception as e:
+    app.logger.error(f"Failed to initialize RAG Manager: {e}")
 
-ninjas_service = None
-if API_NINJAS_KEY:
-    ninjas_service = NinjasService(api_key=API_NINJAS_KEY)
-else:
-    print("Warning: API_NINJAS_KEY not set. NinjasService will not be available for data fetching.")
-
+# Dictionary to store active bots per transcript
+active_bots: Dict[int, AgenticBot] = {}
 
 # --- Flask-Login User Loader ---
 @login_manager.user_loader
 def load_user(user_id):
-    """
-    Required by Flask-Login: Loads a user from the database given their ID.
-    """
     return data_manager.get_user_by_id(int(user_id))
 
-# --- Context Processor for Templates ---
+# --- Context Processor ---
 @app.context_processor
 def inject_global_variables():
-    """
-    Injects global variables into all templates.
-    This makes 'datetime', 'current_user', and 'data_manager' available in templates.
-    """
-    return dict(datetime=datetime, current_user=current_user, data_manager=data_manager)
+    return dict(
+        datetime=datetime,
+        current_user=current_user,
+        data_manager=data_manager,
+        rag_enabled=rag_manager is not None
+    )
 
+# --- Helper Functions ---
+def _extract_transcript_text(transcript_raw: Any) -> str:
+    """Extract text from transcript_raw"""
+    if transcript_raw is None:
+        return ""
+    if isinstance(transcript_raw, str):
+        return transcript_raw
+    if isinstance(transcript_raw, dict):
+        return str(transcript_raw.get("text") or transcript_raw.get("transcript") or "")
+    return str(transcript_raw)
 
-def _first_of(d: dict, *keys, default=None):
-    for k in keys:
-        if k in d and d[k] is not None:
-            return d[k]
-    return default
-
-def _normalize_service_result(res):
-    if isinstance(res, dict):
-        return {
-            "success": bool(res.get("success", False)),
-            "analysis": res.get("analysis") or res.get("parsed") or res.get("result") or res.get("content") or None,
-            "error": res.get("error"),
-            "request_ms": res.get("request_ms") or res.get("api_elapsed_ms") or res.get("api_elapsed") or res.get("requestElapsedMs"),
-            "parse_ms": res.get("parse_ms") or res.get("parse_elapsed_ms") or res.get("parseElapsedMs"),
-            "total_ms": res.get("total_ms") or res.get("totalElapsedMs"),
+def _index_transcript_to_rag(transcript: EarningsCallTranscript) -> bool:
+    """Index a transcript into the RAG system with proper metadata"""
+    if not rag_manager:
+        return False
+    
+    try:
+        transcript_text = _extract_transcript_text(transcript.transcript_raw)
+        if not transcript_text:
+            app.logger.warning(f"Empty transcript text for ID {transcript.transcript_id}")
+            return False
+        
+        metadata = {
+            "ticker_symbol": transcript.ticker_symbol,
+            "fiscal_year": transcript.fiscal_year,
+            "fiscal_quarter": transcript.fiscal_quarter,
+            "call_date": transcript.call_date.isoformat() if transcript.call_date else None
         }
-    if isinstance(res, AnalysisResult):
-        return {
-            "success": bool(getattr(res, "success", False)),
-            "analysis": res.to_dict() if getattr(res, "success", False) else None,
-            "error": getattr(res, "error", None),
-            "request_ms": getattr(res, "request_ms", None),
-            "parse_ms": getattr(res, "parse_ms", None),
-            "total_ms": getattr(res, "total_ms", None),
-        }
-    return {"success": False, "analysis": None, "error": f"Unexpected result type: {type(res)}", "request_ms": None, "parse_ms": None, "total_ms": None}
-
-# -----------------------------------------------------
-# Status
-# -----------------------------------------------------
+        
+        rag_manager.add_texts(
+            texts=[transcript_text],
+            transcript_id=transcript.transcript_id,
+            base_metadata=metadata
+        )
+        
+        app.logger.info(f"Indexed transcript {transcript.transcript_id} to RAG")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"Failed to index transcript {transcript.transcript_id}: {e}")
+        return False
 
 @app.route('/api/v1/status')
+@limiter.limit("30 per minute")
 def status():
-    """API endpoint for checking the status of the EBITA API."""
-    return jsonify({"status": "ok", "message": "EBITA API is operational, barely."}), 200
+    """API status endpoint"""
+    app.logger.debug("Status check requested")
+    return jsonify({
+        "status": "ok",
+        "message": "EBITA API is operational",
+        "services": {
+            "ninjas": ninjas_service is not None,
+            "chatgpt": chatgpt_service is not None,
+            "gemini": gemini_service is not None,
+            "groq": groq_service is not None,
+            "rag": rag_manager is not None
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }), 200
 
 # -----------------------------------------------------
-# Homepage
+# Authentication
 # -----------------------------------------------------
 
 @app.route('/')
+@limiter.limit("100 per minute")
 def index():
-    """Renders the main homepage of the application."""
     return render_template('index.html')
 
-# -----------------------------------------------------
-# Authentication & User Management
-# -----------------------------------------------------
+def _read_body():
+    # Prefer form data; fallback to JSON
+    if request.form:
+        return {k: v for k, v in request.form.items()}
+    return (request.get_json(silent=True) or {})
 
 @app.route('/register', methods=['GET', 'POST'])
+@limiter.limit("5 per hour")
 def register():
-    """Web route for user registration (GET for form, POST for submission)."""
-    if current_user.is_authenticated:
-        flash('You are already logged in.', 'info')
-        return redirect(url_for('index'))
-
     if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
+        data = _read_body()
+        username = (data.get('username') or '').strip()
+        email = (data.get('email') or '').strip()
+        password = (data.get('password') or '').strip()
 
-        if not username or not password:
-            flash("Username and password are required.", 'danger')
+        app.logger.info(f"Registration attempt for username: {username}, email: {email}")
+
+        if not username or not email or not password:
+            app.logger.warning(f"Registration failed: Missing fields for {username}")
+            flash('All fields are required.', 'danger')
             return render_template('register.html')
 
-        new_user = data_manager.create_user(username, email, password)
-        if new_user:
-            login_user(new_user)
-            flash('Registration successful and you are now logged in!', 'success')
-            return redirect(url_for('index'))
+        if not User.validate_username_format(username):
+            app.logger.warning(f"Registration failed: Invalid username format: {username}")
+            flash('Username must be 2+ chars; only letters, numbers, underscores, and hyphens.', 'danger')
+            return render_template('register.html')
+
+        if data_manager.get_user_by_username(username):
+            app.logger.warning(f"Registration failed: Username already exists: {username}")
+            flash('Username already exists.', 'danger')
+            return render_template('register.html')
+
+        if data_manager.get_user_by_email(email):
+            app.logger.warning(f"Registration failed: Email already exists: {email}")
+            flash('Email already exists.', 'danger')
+            return render_template('register.html')
+
+        user = data_manager.create_user(username, email, password)
+        if user:
+            app.logger.info(f"User registered successfully: {username} (ID: {user.user_id})")
+            flash('Registration successful! Please log in.', 'success')
+            return redirect(url_for('login'))
         else:
-            flash("Registration failed. Username or email might already exist.", 'danger')
+            app.logger.error(f"Registration failed: Could not create user {username}")
+            flash('Registration failed.', 'danger')
+    
     return render_template('register.html')
 
-
-@app.route('/api/v1/auth/register', methods=['POST'])
-def api_register():
-    """API endpoint for user registration (JSON request/response)."""
-    data = request.get_json() # Expects JSON
-    username = data.get('username')
-    email = data.get('email')
-    password = data.get('password')
-
-    if not username or not password:
-        return jsonify({"message": "Username and password are required."}), 400
-
-    new_user = data_manager.create_user(username, email, password)
-    if new_user:
-        login_user(new_user)
-        return jsonify({"message": "User registered and logged in successfully!", "user_id": new_user.user_id}), 201
-    else:
-        return jsonify({"message": "Registration failed. Username or email might already exist."}), 409
-
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per hour")
 def login():
-    """Web route for user login (GET for form, POST for submission)."""
-    if current_user.is_authenticated:
-        flash('You are already logged in.', 'info')
-        return redirect(url_for('index'))
-
     if request.method == 'POST':
-        username_or_email = request.form.get('username_or_email')
-        password = request.form.get('password')
+        data = _read_body()
+        username = (data.get('username') or data.get('username_or_email') or '').strip()
+        password = (data.get('password') or '').strip()
+        remember_me = data.get('remember_me', False)  # Add checkbox to login form
 
-        user = data_manager.get_user_by_username(username_or_email)
-        if not user:
-            user = data_manager.get_user_by_email(username_or_email)
+        app.logger.info(f"Login attempt for username: {username}")
 
-        if user and user.check_password(password) and user.is_active:
-            login_user(user)
-            data_manager.update_user_profile(user.user_id, last_login_at=datetime.now())
-            flash('Logged in successfully!', 'success')
-            next_page = request.args.get('next')
-            return redirect(next_page or url_for('index'))
+        if not username or not password:
+            app.logger.warning(f"Login failed: Missing credentials for {username}")
+            flash('Username and password are required.', 'danger')
+            return render_template('login.html')
+
+        user = data_manager.get_user_by_username(username)
+        if user and user.check_password(password):
+            # Set session as permanent if remember_me is checked
+            login_user(user, remember=remember_me)
+            
+            # Mark session as permanent to enable timeout
+            from flask import session
+            if remember_me:
+                session.permanent = True
+                app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)  # 30 days if "remember me"
+            else:
+                session.permanent = True
+                app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)  # 2 hours otherwise
+            
+            app.logger.info(f"User logged in successfully: {username} (ID: {user.user_id})")
+            flash(f'Welcome back, {user.username}!', 'success')
+            return redirect(url_for('dashboard'))
         else:
-            flash('Login failed. Check your username/email and password, or your account may be inactive.', 'danger')
+            app.logger.warning(f"Login failed: Invalid credentials for {username}")
+            flash('Invalid credentials.', 'danger')
+    
     return render_template('login.html')
-
-@app.route('/api/v1/auth/login', methods=['POST'])
-def api_login():
-    """API endpoint for user login (JSON request/response)."""
-    data = request.get_json() # Expects JSON
-    username_or_email = data.get('username_or_email')
-    password = data.get('password')
-
-    user = data_manager.get_user_by_username(username_or_email)
-    if not user:
-        user = data_manager.get_user_by_email(username_or_email)
-
-    if user and user.check_password(password) and user.is_active:
-        login_user(user)
-        data_manager.update_user_profile(user.user_id, last_login_at=datetime.now())
-        return jsonify({"message": "Login successful!", "user_id": user.user_id}), 200
-    else:
-        return jsonify({"message": "Invalid credentials or inactive account."}), 401
 
 @app.route('/logout')
 @login_required
+@limiter.limit("20 per hour")
 def logout():
-    """Web route for user logout."""
+    username = current_user.username
+    user_id = current_user.user_id
+    
+    # Clean up user's active bot sessions
+    bots_to_remove = []
+    for transcript_id, bot in active_bots.items():
+        if bot.user_id == str(user_id):
+            bots_to_remove.append(transcript_id)
+    
+    for transcript_id in bots_to_remove:
+        del active_bots[transcript_id]
+        app.logger.info(f"Cleaned up bot session for transcript {transcript_id}")
+    
     logout_user()
+    app.logger.info(f"User logged out: {username}, cleaned up {len(bots_to_remove)} bot sessions")
     flash('You have been logged out.', 'info')
     return redirect(url_for('index'))
 
-@app.route('/api/v1/auth/logout', methods=['POST'])
+@app.route('/profile', methods=['GET', 'POST'])
 @login_required
-def api_logout():
-    """API endpoint for user logout (JSON response)."""
-    logout_user()
-    return jsonify({"message": "Logged out successfully."}), 200
+@limiter.limit("10 per hour")
+def profile():
+    """User profile page for updating account information"""
+    if request.method == 'POST':
+        data = _read_body()
+        username = (data.get('username') or '').strip()
+        email = (data.get('email') or '').strip()
+        current_password = (data.get('current_password') or '').strip()
+        new_password = (data.get('new_password') or '').strip()
+        confirm_password = (data.get('confirm_password') or '').strip()
+        
+        app.logger.info(f"Profile update attempt for user: {current_user.username} (ID: {current_user.user_id})")
+        
+        # Verify current password first
+        if not current_user.check_password(current_password):
+            app.logger.warning(f"Profile update failed: Incorrect password for {current_user.username}")
+            flash('Current password is incorrect.', 'danger')
+            return render_template('profile.html')
+        
+        # Update username if changed
+        if username and username != current_user.username:
+            if not User.validate_username_format(username):
+                app.logger.warning(f"Profile update failed: Invalid username format: {username}")
+                flash('Username must be 2+ chars; only letters, numbers, underscores, and hyphens.', 'danger')
+                return render_template('profile.html')
+            
+            if data_manager.get_user_by_username(username):
+                app.logger.warning(f"Profile update failed: Username already taken: {username}")
+                flash('Username already taken.', 'danger')
+                return render_template('profile.html')
+            
+            old_username = current_user.username
+            current_user.username = username
+            app.logger.info(f"Username updated: {old_username} -> {username}")
+        
+        # Update email if changed
+        if email and email != current_user.email:
+            if data_manager.get_user_by_email(email):
+                app.logger.warning(f"Profile update failed: Email already in use: {email}")
+                flash('Email already in use.', 'danger')
+                return render_template('profile.html')
+            
+            old_email = current_user.email
+            current_user.email = email
+            app.logger.info(f"Email updated for {current_user.username}: {old_email} -> {email}")
+        
+        # Update password if provided
+        if new_password:
+            if new_password != confirm_password:
+                app.logger.warning(f"Profile update failed: Password mismatch for {current_user.username}")
+                flash('New passwords do not match.', 'danger')
+                return render_template('profile.html')
+            
+            if len(new_password) < 6:
+                app.logger.warning(f"Profile update failed: Password too short for {current_user.username}")
+                flash('New password must be at least 6 characters.', 'danger')
+                return render_template('profile.html')
+            
+            current_user.set_password(new_password)
+            app.logger.info(f"Password updated for {current_user.username}")
+        
+        # Save changes
+        try:
+            db.session.commit()
+            app.logger.info(f"Profile updated successfully for {current_user.username}")
+            flash('Profile updated successfully!', 'success')
+            return redirect(url_for('profile'))
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Profile update failed for {current_user.username}: {e}")
+            flash(f'Error updating profile: {e}', 'danger')
+            return render_template('profile.html')
+    
+    return render_template('profile.html')
 
-@app.route('/api/v1/users/me', methods=['GET'])
-@login_required
-def get_current_user_profile():
-    """API endpoint to retrieve the authenticated user's profile."""
-    user_data = {
-        "user_id": current_user.user_id,
-        "username": current_user.username,
-        "email": current_user.email,
-        "created_at": current_user.created_at.isoformat(),
-        "updated_at": current_user.updated_at.isoformat(),
-        "last_login_at": current_user.last_login_at.isoformat() if current_user.last_login_at else None,
-        "is_active": current_user.is_active
+# --- Swagger UI Configuration ---
+SWAGGER_URL = '/api/docs'
+API_URL = '/static/swagger.yaml'
+
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={
+        'app_name': "My EBITA API Documentation",
+        'docExpansion': 'list',
+        'defaultModelsExpandDepth': 3,
     }
-    return jsonify(user_data), 200
+)
+
+app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
+
+# -----------------------------------------------------
+# Dashboard
+# -----------------------------------------------------
 
 @app.route('/dashboard')
 @login_required
+@limiter.limit("60 per minute")
 def dashboard():
-    """Renders the user's main dashboard."""
-    return render_template('dashboard.html')
+    """User dashboard"""
+    app.logger.debug(f"Dashboard accessed by user: {current_user.username} (ID: {current_user.user_id})")
+    reports = data_manager.get_reports_for_user(current_user.user_id)
+    transcripts = data_manager.get_transcripts_for_user(current_user.user_id)
+    companies = data_manager.get_all_companies()
+    
+    return render_template('dashboard.html',
+                         reports=reports[:10],
+                         transcripts=transcripts[:20],
+                         companies=companies)
 
 # -----------------------------------------------------
-# Companies
+# Transcript Acquisition (Step 2-3)
 # -----------------------------------------------------
 
-@app.route('/api/v1/companies', methods=['GET'])
-def list_companies():
-    """API endpoint to list all companies with optional search/filter/pagination."""
-    search_query = request.args.get('search')
-    industry = request.args.get('industry')
-    sector = request.args.get('sector')
-    limit = request.args.get('limit', type=int)
-    offset = request.args.get('offset', type=int)
+@app.route('/api/v1/acquire_transcript', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def acquire_transcript():
+    """Acquire transcript and automatically index to RAG"""
+    if not ninjas_service:
+        app.logger.error("Acquire transcript failed: Ninjas service not available")
+        return jsonify({"error": "Ninjas service not available"}), 503
+    
+    ticker = request.form.get('ticker', '').strip().upper()
+    year = request.form.get('year', type=int)
+    quarter = request.form.get('quarter', type=int)
+    
+    app.logger.info(f"Transcript acquisition requested by {current_user.username}: {ticker} Q{quarter} {year}")
+    
+    if not all([ticker, year, quarter]):
+        app.logger.warning(f"Acquire transcript failed: Missing parameters")
+        flash("Ticker, year, and quarter are required.", 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        # Check/create company
+        company = data_manager.get_company_by_ticker(ticker)
+        if not company:
+            app.logger.info(f"Fetching company profile for {ticker}")
+            company_profile = ninjas_service.get_company_profile_basic(ticker)
+            if company_profile:
+                company = data_manager.add_company(
+                    ticker_symbol=company_profile.get('symbol') or "",
+                    company_name=company_profile.get('name') or "",
+                    logo_url=company_profile.get('logo_url')
+                )
+                app.logger.info(f"Company created: {ticker}")
+        
+        # Check if transcript exists
+        if year is None or quarter is None:
+            flash("Year and quarter are required.", 'danger')
+            return redirect(url_for('dashboard'))
+        existing = data_manager.get_transcript_by_details(ticker, year, quarter)
+        if existing:
+            app.logger.info(f"Transcript already exists: {ticker} Q{quarter} {year} (ID: {existing.transcript_id})")
+            flash(f"Transcript already exists (ID: {existing.transcript_id})", 'info')
+            return redirect(url_for('dashboard'))
+        
+        # Fetch transcript from Ninjas API
+        app.logger.info(f"Fetching transcript from Ninjas API: {ticker} Q{quarter} {year}")
+        transcript_data = ninjas_service.get_earnings_transcript(ticker, year, quarter)
+        if not transcript_data:
+            app.logger.warning(f"Transcript not found: {ticker} Q{quarter} {year}")
+            flash(f"Transcript not found for {ticker} Q{quarter} {year}", 'danger')
+            return redirect(url_for('dashboard'))
+        
+        call_date = datetime.strptime(transcript_data['date'], '%Y-%m-%d')
+        
+        # Save transcript to database
+        new_transcript = data_manager.add_transcript(
+            user_id=current_user.user_id,
+            ticker_symbol=ticker,
+            fiscal_year=year,
+            fiscal_quarter=quarter,
+            call_date=call_date,
+            transcript_raw=transcript_data['transcript'],
+            transcript_split=transcript_data.get('transcript_split'),
+            source_url=f"API-Ninjas:{ticker}-{year}-Q{quarter}"
+        )
+        
+        if not new_transcript:
+            app.logger.error(f"Failed to save transcript: {ticker} Q{quarter} {year}")
+            flash("Failed to save transcript", 'danger')
+            return redirect(url_for('dashboard'))
+        
+        app.logger.info(f"Transcript saved: {ticker} Q{quarter} {year} (ID: {new_transcript.transcript_id})")
+        
+        # Step 3: Auto-index to RAG using the ORIGINAL sync method
+        if rag_manager:
+            indexed = _index_transcript_to_rag(new_transcript)  # Use original sync function
+            if indexed:
+                app.logger.info(f"Transcript indexed to RAG: {new_transcript.transcript_id}")
+                flash(f"✓ Transcript acquired and indexed! (ID: {new_transcript.transcript_id})", 'success')
+            else:
+                app.logger.warning(f"Transcript saved but indexing failed: {new_transcript.transcript_id}")
+                flash(f"Transcript acquired (ID: {new_transcript.transcript_id}) but indexing failed", 'warning')
+        else:
+            flash(f"Transcript acquired (ID: {new_transcript.transcript_id})", 'success')
+        
+        return redirect(url_for('dashboard'))
+        
+    except Exception as e:
+        app.logger.error(f"Error acquiring transcript {ticker} Q{quarter} {year}: {e}", exc_info=True)
+        flash(f"Error: {e}", 'danger')
+        return redirect(url_for('dashboard'))
 
-    companies = data_manager.get_all_companies(
-        search_query=search_query,
-        industry=industry,
-        sector=sector,
-        limit=limit,
-        offset=offset
-    )
-
-    companies_data = [{
-        "ticker_symbol": c.ticker_symbol,
-        "company_name": c.company_name,
-        "industry": c.industry,
-        "sector": c.sector,
-        "exchange": c.exchange,
-        "logo_url": c.logo_url,
-        "last_updated": c.last_updated.isoformat() if c.last_updated else None
-    } for c in companies]
-    return jsonify(companies_data), 200
-
-@app.route('/api/v1/companies/<string:ticker_symbol>', methods=['GET'])
-def get_company(ticker_symbol):
-    """API endpoint to get details for a specific company."""
-    company = data_manager.get_company_by_ticker(ticker_symbol.upper())
-    if not company:
-        return jsonify({"message": "Company not found."}), 404
-
-    company_data = {
-        "ticker_symbol": company.ticker_symbol,
-        "company_name": company.company_name,
-        "industry": company.industry,
-        "sector": company.sector,
-        "exchange": company.exchange,
-        "logo_url": company.logo_url,
-        "last_updated": company.last_updated.isoformat() if company.last_updated else None
-    }
-    return jsonify(company_data), 200
-
-# -----------------------------------------------------
-# Earnings Call Transcripts
-# -----------------------------------------------------
-
-@app.route('/api/v1/companies/<string:ticker_symbol>/transcripts', methods=['GET'])
-def list_company_transcripts(ticker_symbol):
-    """API endpoint to list all transcripts for a given company."""
-    transcripts = data_manager.get_transcripts_for_company(ticker_symbol.upper())
-    if not transcripts:
-        return jsonify({"message": f"No transcripts found for {ticker_symbol}."}), 404
-
-    transcripts_data = [{
-        "transcript_id": t.transcript_id,
-        "ticker_symbol": t.ticker_symbol,
-        "fiscal_year": t.fiscal_year,
-        "fiscal_quarter": t.fiscal_quarter,
-        "call_date": t.call_date.isoformat(),
-        "source_url": t.source_url,
-        "fetched_at": t.fetched_at.isoformat()
-    } for t in transcripts]
-    return jsonify(transcripts_data), 200
-
-@app.route('/api/v1/transcripts/<int:transcript_id>', methods=['GET'])
-def get_transcript(transcript_id):
-    """API endpoint to retrieve a full earnings call transcript by ID."""
+@app.route('/transcripts/<int:transcript_id>')
+@login_required
+@limiter.limit("30 per minute")
+def view_transcript(transcript_id):
+    """View transcript details"""
+    app.logger.debug(f"Transcript view requested: {transcript_id} by {current_user.username}")
     transcript = data_manager.get_transcript_by_id(transcript_id)
     if not transcript:
-        return jsonify({"message": "Transcript not found."}), 404
+        app.logger.warning(f"Transcript not found: {transcript_id}")
+        flash("Transcript not found", 'danger')
+        return redirect(url_for('dashboard'))
+    
+    return render_template('transcript_view.html', transcript=transcript)
 
-    transcript_data = {
+@app.route('/api/v1/transcripts/<int:transcript_id>', methods=['GET'])
+@login_required
+@limiter.limit("30 per minute")
+def get_transcript(transcript_id):
+    """Get transcript data as JSON (API endpoint)"""
+    app.logger.debug(f"Transcript API request: {transcript_id} by {current_user.username}")
+    transcript = data_manager.get_transcript_by_id(transcript_id)
+    if not transcript:
+        app.logger.warning(f"Transcript not found: {transcript_id}")
+        return jsonify({"error": "Transcript not found"}), 404
+    
+    return jsonify({
         "transcript_id": transcript.transcript_id,
         "ticker_symbol": transcript.ticker_symbol,
         "fiscal_year": transcript.fiscal_year,
         "fiscal_quarter": transcript.fiscal_quarter,
-        "call_date": transcript.call_date.isoformat(),
-        "raw_text": transcript.raw_text,
-        "speaker_segments": transcript.speaker_segments,
-        "source_url": transcript.source_url,
-        "fetched_at": transcript.fetched_at.isoformat()
-    }
-    return jsonify(transcript_data), 200
+        "call_date": transcript.call_date.isoformat() if transcript.call_date else None,
+        "transcript_raw": _extract_transcript_text(transcript.transcript_raw),
+        "source_url": transcript.source_url
+    }), 200
 
-@app.route('/transcripts/<int:transcript_id>', methods=['POST'])
+@app.route('/api/v1/transcripts/<int:transcript_id>/delete', methods=['POST'])
 @login_required
+@limiter.limit("10 per hour")
 def delete_transcript(transcript_id):
-    """Deletes a transcript and all its associated reports."""
-    # First, get the transcript to ensure it exists
+    """Delete a transcript and its reports"""
+    app.logger.info(f"Transcript deletion requested: {transcript_id} by {current_user.username}")
     transcript = data_manager.get_transcript_by_id(transcript_id)
     if not transcript:
-        flash(f"Transcript ID {transcript_id} not found.", 'danger')
+        app.logger.warning(f"Transcript not found for deletion: {transcript_id}")
+        flash("Transcript not found", 'danger')
         return redirect(url_for('dashboard'))
+    
+    if transcript.user_id != current_user.user_id:
+        app.logger.warning(f"Unauthorized transcript deletion attempt: {transcript_id} by {current_user.username}")
+        flash("Unauthorized", 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        data_manager.delete_transcript(transcript_id)
+        app.logger.info(f"Transcript deleted: {transcript_id}")
+        flash(f"Transcript {transcript_id} deleted successfully", 'success')
+    except Exception as e:
+        app.logger.error(f"Error deleting transcript {transcript_id}: {e}")
+        flash(f"Error deleting transcript: {e}", 'danger')
+    
+    return redirect(url_for('dashboard'))
 
-    # You could add a check here to ensure the user owns the reports associated
-    # with this transcript, but since all reports are tied to the user,
-    # deleting the transcript will only affect that user's reports.
-    # The cascading delete in the data model will handle this.
-
-    if data_manager.delete_transcript(transcript_id):
-        flash(f"Transcript ID {transcript_id} and all associated reports have been deleted.", 'success')
-    else:
-        flash(f"Failed to delete transcript ID {transcript_id}.", 'danger')
-
+@app.route('/api/v1/reports/<int:report_id>/delete', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def delete_analysis_report(report_id):
+    """Delete an analysis report"""
+    app.logger.info(f"Report deletion requested: {report_id} by {current_user.username}")
+    report = data_manager.get_report_by_id(report_id)
+    if not report:
+        app.logger.warning(f"Report not found for deletion: {report_id}")
+        flash("Report not found", 'danger')
+        return redirect(url_for('dashboard'))
+    
+    if report.user_id != current_user.user_id:
+        app.logger.warning(f"Unauthorized report deletion attempt: {report_id} by {current_user.username}")
+        flash("Unauthorized", 'danger')
+        return redirect(url_for('dashboard'))
+    
+    try:
+        data_manager.delete_analysis_report(report_id)
+        app.logger.info(f"Report deleted: {report_id}")
+        flash(f"Report {report_id} deleted successfully", 'success')
+    except Exception as e:
+        app.logger.error(f"Error deleting report {report_id}: {e}")
+        flash(f"Error deleting report: {e}", 'danger')
+    
     return redirect(url_for('dashboard'))
 
 # -----------------------------------------------------
-# Data Acquisition (using NinjasService)
-# -----------------------------------------------------
-@app.route('/api/v1/acquire_transcript', methods=['POST'])
-@login_required
-def acquire_transcript():
-    """
-    API endpoint to acquire an earnings transcript and company profile using NinjasService.
-    """
-    if not ninjas_service:
-        flash("API Ninjas Service not available (API key missing).", 'danger')
-        return redirect(url_for('dashboard'))
-
-    # Changed from request.get_json() to request.form for HTML form submissions
-    ticker = request.form.get('ticker')
-    year = request.form.get('year', type=int)
-    quarter = request.form.get('quarter', type=int)
-
-    # Normalize ticker to a safe uppercase string (avoid calling .upper() on None)
-    ticker_norm = (ticker or '').strip().upper() if isinstance(ticker, str) else ''
-
-    if not all([ticker_norm, year, quarter]):
-        flash("Ticker, year, and quarter are required.", 'danger')
-        return redirect(url_for('dashboard'))
-
-    try:
-        # First, trying to get/add the company profile
-        company = data_manager.get_company_by_ticker(ticker_norm)
-        if not company:
-            company_profile = ninjas_service.get_company_profile_basic(ticker_norm)
-            if company_profile:
-                company = data_manager.add_company(
-                    ticker_symbol=company_profile.get('symbol'),
-                    company_name=company_profile.get('name'),
-                    # API Ninjas logo API doesn't provide industry/sector, so these remain null for now
-                    logo_url=company_profile.get('logo_url')
-                )
-                if not company:
-                    # If company could not be added after fetching, flash and redirect
-                    flash(f"Warning: Company {ticker_norm} could not be added to database after fetching profile.", 'warning')
-                    return redirect(url_for('dashboard'))
-            else:
-                flash(f"Company profile not found for {ticker_norm} from API Ninjas.", 'danger')
-                return redirect(url_for('dashboard'))
-
-        # Second, trying to get the transcript
-        # At this point ticker_norm, year, and quarter have been validated above;
-        # add an assertion to help static type checkers (and ensure runtime safety).
-        assert isinstance(year, int) and isinstance(quarter, int)
-
-        transcript_exists = data_manager.get_transcript_by_details(ticker_norm, year, quarter)
-        if transcript_exists:
-            flash(f"Transcript for {ticker_norm} Q{quarter} {year} already exists (ID: {transcript_exists.transcript_id}).", 'info')
-            return redirect(url_for('dashboard'))
-
-        ninjas_transcript_data = ninjas_service.get_earnings_transcript(ticker_norm, year, quarter)
-        if not ninjas_transcript_data:
-            flash(f"Transcript not found from API Ninjas for {ticker_norm} Q{quarter} {year}.", 'danger')
-            return redirect(url_for('dashboard'))
-
-        # Converting date string to datetime.date object
-        call_date = datetime.strptime(ninjas_transcript_data['date'], '%Y-%m-%d').date()
-
-        new_transcript = data_manager.add_transcript(
-            ticker_symbol=ticker_norm,
-            fiscal_year=year,
-            fiscal_quarter=quarter,
-            call_date=call_date,
-            raw_text=ninjas_transcript_data['transcript'],
-            speaker_segments=ninjas_transcript_data.get('transcript_split'),
-            source_url=f"API-Ninjas:{ticker_norm}-{year}-Q{quarter}"
-        )
-
-        if new_transcript:
-            flash(f"Transcript acquired and saved successfully! (ID: {new_transcript.transcript_id})", 'success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash("Failed to save acquired transcript (e.g., integrity error). Consider checking logs.", 'danger')
-            return redirect(url_for('dashboard'))
-
-    except ValueError as e:
-        flash(f"Input error: {e}", 'danger')
-        return redirect(url_for('dashboard'))
-    except Exception as e:
-        print(f"Error acquiring transcript: {e}")
-        flash(f"An error occurred during data acquisition: {e}", 'danger')
-        return redirect(url_for('dashboard'))
-
-# -----------------------------------------------------
-# Analysis Reports
+# AI Analysis (Step 4)
 # -----------------------------------------------------
 
 @app.route('/api/v1/analysis', methods=['POST'])
 @login_required
+@limiter.limit("5 per hour")
 def request_analysis():
-    """
-    API endpoint to request a new AI analysis for an earnings call transcript.
-    This performs analysis using Gemini, ChatGPT, and Groq.
-    """
+    """Run AI analysis on transcript using all three services (in parallel)"""
     transcript_id = request.form.get('transcript_id', type=int)
-    # Allow an optional custom prompt from the user. If none is provided,
-    # fall back to the app-level default so services receive a prompt.
-    analysis_prompt = request.form.get('analysis_prompt')
-    if isinstance(analysis_prompt, str):
-        analysis_prompt = analysis_prompt.strip()
-    # If user provided nothing, use app-level default
-    if not analysis_prompt:
-        analysis_prompt = DEFAULT_ANALYSIS_PROMPT
-
+    
+    app.logger.info(f"AI analysis requested for transcript {transcript_id} by {current_user.username}")
+    
     if not transcript_id:
-        flash("Transcript ID is required to perform analysis.", 'danger')
+        app.logger.warning("Analysis request missing transcript_id")
+        flash("Transcript ID is required.", 'danger')
         return redirect(url_for('dashboard'))
-
+    
     transcript = data_manager.get_transcript_by_id(transcript_id)
     if not transcript:
-        flash("Transcript not found for analysis.", 'danger')
+        app.logger.warning(f"Transcript not found for analysis: {transcript_id}")
+        flash("Transcript not found", 'danger')
         return redirect(url_for('dashboard'))
-
-    gemini_analysis_result = {"success": False, "error": "Gemini Service not available."}
-    chatgpt_analysis_result = {"success": False, "error": "ChatGPT Service not available."}
-    groq_analysis_result = {"success": False, "error": "Groq Service not available."}
-
-    # --- Call Gemini Service ---
-    if gemini_service:
+    
+    transcript_text = _extract_transcript_text(transcript.transcript_raw)
+    
+    # Define analysis functions for each service
+    def analyze_with_chatgpt():
+        if not chatgpt_service:
+            return None
         try:
-            raw_gemini = gemini_service.analyze_transcript(transcript.raw_text, analysis_prompt, temperature=DEFAULT_TEMPERATURE)
-            gemini_analysis_result = _normalize_service_result(raw_gemini)
-            print(f"Gemini Analysis Success: {gemini_analysis_result.get('success')}")
+            app.logger.info(f"Running ChatGPT analysis for transcript {transcript_id}")
+            result = chatgpt_service.analyze_transcript(transcript_text)
+            app.logger.info(f"ChatGPT analysis complete for transcript {transcript_id}")
+            return {
+                'success': True,
+                'data': result.structured_output.model_dump() if hasattr(result, 'structured_output') else {},
+                'metrics': {
+                    'request_time_ms': result.request_time_ms,
+                    'model': result.model
+                }
+            }
         except Exception as e:
-            print(f"Error during Gemini analysis: {e}")
-            gemini_analysis_result = {"success": False, "error": f"Gemini Service Error: {e}"}
-    else:
-        print("GeminiService not initialized.")
-
-    # --- Call ChatGPT Service ---
-    if chatgpt_service:
+            app.logger.error(f"ChatGPT analysis failed for transcript {transcript_id}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def analyze_with_gemini():
+        if not gemini_service:
+            return None
         try:
-            raw_chatgpt = chatgpt_service.analyze_transcript(transcript.raw_text, analysis_prompt, max_tokens=DEFAULT_MAX_TOKENS, temperature=DEFAULT_TEMPERATURE)
-            chatgpt_analysis_result = _normalize_service_result(raw_chatgpt)
-            print(f"ChatGPT Analysis Success: {chatgpt_analysis_result.get('success')}")
+            app.logger.info(f"Running Gemini analysis for transcript {transcript_id}")
+            result = gemini_service.analyze_transcript(transcript_text)
+            app.logger.info(f"Gemini analysis complete for transcript {transcript_id}")
+            return {
+                'success': True,
+                'data': result.structured_output.model_dump() if hasattr(result, 'structured_output') else {},
+                'metrics': {
+                    'request_time_ms': result.request_time_ms,
+                    'model': result.model
+                }
+            }
         except Exception as e:
-            print(f"Error during ChatGPT analysis: {e}")
-            chatgpt_analysis_result = {"success": False, "error": f"ChatGPT Service Error: {e}"}
-    else:
-        print("ChatGPTService not initialized.")
-
-    # --- Call Groq Service ---
-    if groq_service:
+            app.logger.error(f"Gemini analysis failed for transcript {transcript_id}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def analyze_with_groq():
+        if not groq_service:
+            return None
         try:
-            raw_groq = groq_service.analyze_transcript(transcript.raw_text, analysis_prompt, temperature=DEFAULT_TEMPERATURE)
-            groq_analysis_result = _normalize_service_result(raw_groq)
-            print(f"Groq Analysis Success: {groq_analysis_result.get('success')}")
+            app.logger.info(f"Running Groq analysis for transcript {transcript_id}")
+            result = groq_service.analyze_transcript(transcript_text)
+            app.logger.info(f"Groq analysis complete for transcript {transcript_id}")
+            return {
+                'success': True,
+                'data': result.structured_output.model_dump() if hasattr(result, 'structured_output') else {},
+                'metrics': {
+                    'request_time_ms': result.request_time_ms,
+                    'model': result.model
+                }
+            }
         except Exception as e:
-            print(f"Error during Groq analysis: {e}")
-            groq_analysis_result = {"success": False, "error": f"Groq Service Error: {e}"}
-    else:
-        print("GroqService not initialized.")
+            app.logger.error(f"Groq analysis failed for transcript {transcript_id}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    # Run all three analyses in parallel using ThreadPoolExecutor
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        # Submit all tasks
+        future_chatgpt = executor.submit(analyze_with_chatgpt)
+        future_gemini = executor.submit(analyze_with_gemini)
+        future_groq = executor.submit(analyze_with_groq)
+        
+        # Wait for all to complete and collect results
+        chatgpt_result = future_chatgpt.result()
+        gemini_result = future_gemini.result()
+        groq_result = future_groq.result()
+        
+        if chatgpt_result:
+            results['chatgpt'] = chatgpt_result
+        if gemini_result:
+            results['gemini'] = gemini_result
+        if groq_result:
+            results['groq'] = groq_result
+    
+    app.logger.info(f"All parallel analyses complete for transcript {transcript_id}")
+    
+    # Save to database (rest of the code remains the same)
+    def get_field(service_results, field, default: Any = ""):
+        if service_results and service_results.get('success') and 'data' in service_results:
+            return service_results['data'].get(field, default)
+        return default
+    
+    report_data = {        
+        # ChatGPT fields
+        'chatgpt_summary': get_field(results.get('chatgpt'), 'summary'),
+        'chatgpt_concise_rationale': get_field(results.get('chatgpt'), 'concise_rationale'),
+        'chatgpt_overall_sentiment': get_field(results.get('chatgpt'), 'overall_sentiment', 'Neutral'),
+        'chatgpt_management_confidence_score': get_field(results.get('chatgpt'), 'management_confidence_score', 0),
+        'chatgpt_evasiveness_score_q_a': get_field(results.get('chatgpt'), 'evasiveness_score_q_a', 0),
+        'chatgpt_key_topics_discussed': get_field(results.get('chatgpt'), 'key_topics', []),
+        'chatgpt_red_flags_identified': get_field(results.get('chatgpt'), 'red_flags', []),
+        'chatgpt_raw_response_json': results.get('chatgpt', {}),
+        'chatgpt_request_ms': results.get('chatgpt', {}).get('metrics', {}).get('request_time_ms') if results.get('chatgpt') else None,
+        
+        # Gemini fields
+        'gemini_summary': get_field(results.get('gemini'), 'summary'),
+        'gemini_concise_rationale': get_field(results.get('gemini'), 'concise_rationale'),
+        'gemini_overall_sentiment': get_field(results.get('gemini'), 'overall_sentiment', 'Neutral'),
+        'gemini_management_confidence_score': get_field(results.get('gemini'), 'management_confidence_score', 0),
+        'gemini_evasiveness_score_q_a': get_field(results.get('gemini'), 'evasiveness_score_q_a', 0),
+        'gemini_key_topics_discussed': get_field(results.get('gemini'), 'key_topics', []),
+        'gemini_red_flags_identified': get_field(results.get('gemini'), 'red_flags', []),
+        'gemini_raw_response_json': results.get('gemini', {}),
+        'gemini_request_ms': results.get('gemini', {}).get('metrics', {}).get('request_time_ms') if results.get('gemini') else None,
 
-    # Preparing data for DataManager based on AI results
-    # Extract concise rationale + timings and include them in DB payload
-    gemini_data_for_db = {}
-    gemini_req_ms = gemini_analysis_result.get("request_ms")
-    gemini_parse_ms = gemini_analysis_result.get("parse_ms")
-    gemini_total_ms = gemini_analysis_result.get("total_ms")
-    if gemini_analysis_result and gemini_analysis_result.get("success"):
-        parsed_gemini_output = gemini_analysis_result["analysis"] or {}
-        gemini_data_for_db = {
-            "gemini_summary": parsed_gemini_output.get("summary", ""),
-            "gemini_concise_rationale": _first_of(parsed_gemini_output, "concise_rationale", "conciseRationale", "rationale"),
-            "gemini_overall_sentiment": parsed_gemini_output.get("overall_sentiment", "Neutral"),
-            "gemini_sentiment_scores_by_segment": parsed_gemini_output.get("sentiment_scores_by_segment"),
-            "gemini_management_confidence_score": parsed_gemini_output.get("management_confidence_score"),
-            "gemini_evasiveness_score_q_a": parsed_gemini_output.get("evasiveness_score_q_a"),
-            "gemini_key_topics_discussed": parsed_gemini_output.get("key_topics"),
-            "gemini_red_flags_identified": parsed_gemini_output.get("red_flags"),
-            "gemini_raw_response_json": parsed_gemini_output,
-            "gemini_request_ms": gemini_req_ms,
-            "gemini_parse_ms": gemini_parse_ms,
-            "gemini_total_ms": gemini_total_ms,
-        }
-    else:
-        gemini_data_for_db = {
-            "gemini_summary": f"Gemini analysis failed: {gemini_analysis_result.get('error', 'N/A')}",
-            "gemini_concise_rationale": None,
-            "gemini_overall_sentiment": "Error",
-            "gemini_sentiment_scores_by_segment": None,
-            "gemini_management_confidence_score": None,
-            "gemini_evasiveness_score_q_a": None,
-            "gemini_key_topics_discussed": None,
-            "gemini_red_flags_identified": None,
-            "gemini_raw_response_json": {"error": gemini_analysis_result.get('error', 'N/A')},
-            "gemini_request_ms": gemini_req_ms,
-            "gemini_parse_ms": gemini_parse_ms,
-            "gemini_total_ms": gemini_total_ms,
-        }
-
-    chatgpt_data_for_db = {}
-    chatgpt_req_ms = chatgpt_analysis_result.get("request_ms")
-    chatgpt_parse_ms = chatgpt_analysis_result.get("parse_ms")
-    chatgpt_total_ms = chatgpt_analysis_result.get("total_ms")
-    if chatgpt_analysis_result and chatgpt_analysis_result.get("success"):
-        parsed_chatgpt_output = chatgpt_analysis_result["analysis"] or {}
-        chatgpt_data_for_db = {
-            "chatgpt_summary": parsed_chatgpt_output.get("summary", ""),
-            "chatgpt_concise_rationale": _first_of(parsed_chatgpt_output, "concise_rationale", "conciseRationale", "rationale"),
-            "chatgpt_overall_sentiment": parsed_chatgpt_output.get("overall_sentiment", "Neutral"),
-            "chatgpt_sentiment_scores_by_segment": parsed_chatgpt_output.get("sentiment_scores_by_segment"),
-            "chatgpt_management_confidence_score": parsed_chatgpt_output.get("management_confidence_score"),
-            "chatgpt_evasiveness_score_q_a": parsed_chatgpt_output.get("evasiveness_score_q_a"),
-            "chatgpt_key_topics_discussed": parsed_chatgpt_output.get("key_topics"),
-            "chatgpt_red_flags_identified": parsed_chatgpt_output.get("red_flags"),
-            "chatgpt_raw_response_json": parsed_chatgpt_output,
-            "chatgpt_request_ms": chatgpt_req_ms,
-            "chatgpt_parse_ms": chatgpt_parse_ms,
-            "chatgpt_total_ms": chatgpt_total_ms,
-        }
-    else:
-        chatgpt_data_for_db = {
-            "chatgpt_summary": f"ChatGPT analysis failed: {chatgpt_analysis_result.get('error', 'N/A')}",
-            "chatgpt_concise_rationale": None,
-            "chatgpt_overall_sentiment": "Error",
-            "chatgpt_sentiment_scores_by_segment": None,
-            "chatgpt_management_confidence_score": None,
-            "chatgpt_evasiveness_score_q_a": None,
-            "chatgpt_key_topics_discussed": None,
-            "chatgpt_red_flags_identified": None,
-            "chatgpt_raw_response_json": {"error": chatgpt_analysis_result.get('error', 'N/A')},
-            "chatgpt_request_ms": chatgpt_req_ms,
-            "chatgpt_parse_ms": chatgpt_parse_ms,
-            "chatgpt_total_ms": chatgpt_total_ms,
-        }
-
-    # --- Groq DB payload ---
-    groq_data_for_db = {}
-    groq_req_ms = groq_analysis_result.get("request_ms")
-    groq_parse_ms = groq_analysis_result.get("parse_ms")
-    groq_total_ms = groq_analysis_result.get("total_ms")
-    if groq_analysis_result and groq_analysis_result.get("success"):
-        parsed_groq_output = groq_analysis_result["analysis"] or {}
-        groq_data_for_db = {
-            "groq_summary": parsed_groq_output.get("summary", ""),
-            "groq_concise_rationale": _first_of(parsed_groq_output, "concise_rationale", "conciseRationale", "rationale"),
-            "groq_overall_sentiment": parsed_groq_output.get("overall_sentiment", "Neutral"),
-            "groq_sentiment_scores_by_segment": parsed_groq_output.get("sentiment_scores_by_segment"),
-            "groq_management_confidence_score": parsed_groq_output.get("management_confidence_score"),
-            "groq_evasiveness_score_q_a": parsed_groq_output.get("evasiveness_score_q_a"),
-            "groq_key_topics_discussed": parsed_groq_output.get("key_topics"),
-            "groq_red_flags_identified": parsed_groq_output.get("red_flags"),
-            "groq_raw_response_json": parsed_groq_output,
-            "groq_request_ms": groq_req_ms,
-            "groq_parse_ms": groq_parse_ms,
-            "groq_total_ms": groq_total_ms,
-        }
-    else:
-        groq_data_for_db = {
-            "groq_summary": f"Groq analysis failed: {groq_analysis_result.get('error', 'N/A')}",
-            "groq_concise_rationale": None,
-            "groq_overall_sentiment": "Error",
-            "groq_sentiment_scores_by_segment": None,
-            "groq_management_confidence_score": None,
-            "groq_evasiveness_score_q_a": None,
-            "groq_key_topics_discussed": None,
-            "groq_red_flags_identified": None,
-            "groq_raw_response_json": {"error": groq_analysis_result.get('error', 'N/A')},
-            "groq_request_ms": groq_req_ms,
-            "groq_parse_ms": groq_parse_ms,
-            "groq_total_ms": groq_total_ms,
-        }
-
+        # Groq fields
+        'groq_summary': get_field(results.get('groq'), 'summary'),
+        'groq_concise_rationale': get_field(results.get('groq'), 'concise_rationale'),
+        'groq_overall_sentiment': get_field(results.get('groq'), 'overall_sentiment', 'Neutral'),
+        'groq_management_confidence_score': get_field(results.get('groq'), 'management_confidence_score', 0),
+        'groq_evasiveness_score_q_a': get_field(results.get('groq'), 'evasiveness_score_q_a', 0),
+        'groq_key_topics_discussed': get_field(results.get('groq'), 'key_topics', []),
+        'groq_red_flags_identified': get_field(results.get('groq'), 'red_flags', []),
+        'groq_raw_response_json': results.get('groq', {}),
+        'groq_request_ms': results.get('groq', {}).get('metrics', {}).get('request_time_ms') if results.get('groq') else None,
+    }
+    
     new_report = data_manager.create_analysis_report(
-         user_id=current_user.user_id,
-         transcript_id=transcript_id,
-         # Pass all relevant data from AI analysis results
-         **gemini_data_for_db,
-         **chatgpt_data_for_db,
-         **groq_data_for_db
-     )
-
+        user_id=current_user.user_id,
+        transcript_id=transcript_id,
+        **report_data
+    )
+    
     if new_report:
-        flash("AI analysis requested and saved successfully!", 'success')
-        return redirect(url_for('dashboard')) # Redirect back to dashboard to see new report
-    else:
-        # This branch indicates a problem with db.session.add() or db.session.commit()
-        flash("Failed to save dual analysis report. Check server logs for details (e.g., IntegrityError).", 'danger')
+        app.logger.info(f"Analysis report created: {new_report.report_id} for transcript {transcript_id}")
+        flash(f"✓ Analysis complete! Report #{new_report.report_id} created.", 'success')
         return redirect(url_for('dashboard'))
-
-
-@app.route('/api/v1/analysis', methods=['GET'])
-@login_required
-def list_user_analysis_reports():
-    """API endpoint to list all analysis reports for the current user."""
-    # This route is usually for API consumption. Your dashboard directly calls data_manager.
-    # Leaving it as is, but focusing on the DataManager methods for the dashboard.
-    reports = data_manager.get_reports_for_user(current_user.user_id)
-    reports_data = []
-    for r in reports:
-        # Ensure these relationships are eagerly loaded or accessed within app context
-        # In data_models.py, 'transcript' and 'company' are lazy-loaded by default,
-        # which means accessing them here is fine as long as the session is open.
-        transcript = r.transcript # Access relationship directly
-        company = r.transcript.company
-
-        # Ensure that `company` and `transcript` objects exist before trying to access their attributes
-        ticker_symbol = company.ticker_symbol if company else None
-        company_name = company.company_name if company else None
-        fiscal_year = transcript.fiscal_year if transcript else None
-        fiscal_quarter = transcript.fiscal_quarter if transcript else None
-        call_date = transcript.call_date.isoformat() if transcript and transcript.call_date else None
-
-
-        reports_data.append({
-                 "report_id": r.report_id,
-                 "transcript_id": r.transcript_id,
-                 "ticker_symbol": ticker_symbol,
-                 "company_name": company_name,
-                 "fiscal_year": fiscal_year,
-                 "fiscal_quarter": fiscal_quarter,
-                 "call_date": call_date,
-                 "analysis_date": r.analysis_date.isoformat(),
-
-                 "gemini_summary": r.gemini_summary,
-                 "gemini_overall_sentiment": r.gemini_overall_sentiment,
-                 "gemini_management_confidence_score": r.gemini_management_confidence_score,
-                 "gemini_evasiveness_score_q_a": r.gemini_evasiveness_score_q_a,
-                 "gemini_key_topics_discussed": r.gemini_key_topics_discussed,
-                 "gemini_red_flags_identified": r.gemini_red_flags_identified,
-                 "gemini_raw_response_json": r.gemini_raw_response_json,
-
-                 "chatgpt_summary": r.chatgpt_summary,
-                 "chatgpt_overall_sentiment": r.chatgpt_overall_sentiment,
-                 "chatgpt_sentiment_scores_by_segment": r.chatgpt_sentiment_scores_by_segment,
-                 "chatgpt_management_confidence_score": r.chatgpt_management_confidence_score,
-                 "chatgpt_evasiveness_score_q_a": r.chatgpt_evasiveness_score_q_a,
-                 "chatgpt_key_topics_discussed": r.chatgpt_key_topics_discussed,
-                 "chatgpt_red_flags_identified": r.chatgpt_red_flags_identified,
-                 "chatgpt_raw_response_json": r.chatgpt_raw_response_json
-             })
-    return jsonify(reports_data), 200
+    else:
+        app.logger.error(f"Failed to save analysis report for transcript {transcript_id}")
+        flash("Failed to save analysis report", 'danger')
+        return redirect(url_for('dashboard'))
 
 @app.route('/analysis/<int:report_id>')
 @login_required
+@limiter.limit("30 per minute")
 def view_analysis_report(report_id):
-    """Renders a single, detailed analysis report page."""
+    """View analysis report (Step 4 - display results)"""
+    app.logger.debug(f"Analysis report view requested: {report_id} by {current_user.username}")
     report = data_manager.get_report_by_id(report_id)
-
+    
     if not report:
-        flash("Analysis report not found.", 'danger')
+        app.logger.warning(f"Report not found: {report_id}")
+        flash("Report not found", 'danger')
         return redirect(url_for('dashboard'))
-
+    
     if report.user_id != current_user.user_id:
-        flash("You do not have permission to view this report.", 'danger')
+        app.logger.warning(f"Unauthorized report access attempt: {report_id} by {current_user.username}")
+        flash("Unauthorized", 'danger')
         return redirect(url_for('dashboard'))
-
+    
     return render_template('analysis_report.html', report=report)
 
-@app.route('/analysis/<int:report_id>/delete', methods=['POST'])
+@app.route('/api/v1/reports/<int:report_id>/raw/<ai_name>')
 @login_required
-def delete_analysis_report(report_id):
-    """Deletes a specific analysis report by ID."""
-    report = data_manager.get_report_by_id(report_id)
-
-    if not report:
-        flash("Analysis report not found.", 'danger')
-        return redirect(url_for('dashboard'))
-
-    if report.user_id != current_user.user_id:
-        flash("You do not have permission to delete this report.", 'danger')
-        return redirect(url_for('dashboard'))
-
-    if data_manager.delete_analysis_report(report_id):
-        flash(f"Analysis report {report_id} has been deleted.", 'success')
-    else:
-        flash(f"Failed to delete analysis report {report_id}.", 'danger')
-
-    return redirect(url_for('dashboard'))
-
-@app.route('/analysis/raw/<int:report_id>/<string:ai_name>')
-@login_required
+@limiter.limit("30 per minute")
 def view_raw_analysis_json(report_id, ai_name):
-    """
-    API endpoint to retrieve the raw JSON response for a specific report and AI.
-    """
+    """View raw JSON data for a specific AI service's analysis"""
+    app.logger.debug(f"Raw JSON requested: report {report_id}, AI {ai_name} by {current_user.username}")
     report = data_manager.get_report_by_id(report_id)
+    
     if not report:
-        return jsonify({"message": "Analysis report not found."}), 404
-
+        app.logger.warning(f"Report not found for raw JSON: {report_id}")
+        return jsonify({"error": "Report not found"}), 404
+    
     if report.user_id != current_user.user_id:
-        return jsonify({"message": "Unauthorized: You do not have access to this report."}), 403
-
-    if ai_name.lower() == 'gemini':
-        raw_json = report.gemini_raw_response_json
-    elif ai_name.lower() == 'chatgpt':
-        raw_json = report.chatgpt_raw_response_json
-    elif ai_name.lower() == 'groq':
-        raw_json = report.groq_raw_response_json
+        app.logger.warning(f"Unauthorized raw JSON access: report {report_id} by {current_user.username}")
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    # Get the appropriate raw response based on ai_name
+    if ai_name == 'chatgpt':
+        raw_data = report.chatgpt_raw_response_json
+    elif ai_name == 'gemini':
+        raw_data = report.gemini_raw_response_json
+    elif ai_name == 'groq':
+        raw_data = report.groq_raw_response_json
     else:
-        return jsonify({"message": "Invalid AI name. Must be 'gemini', 'chatgpt' or 'groq'."}), 400
+        app.logger.warning(f"Invalid AI service name requested: {ai_name}")
+        return jsonify({"error": "Invalid AI service name"}), 400
+    
+    return jsonify(raw_data), 200, {'Content-Type': 'application/json'}
 
-    if raw_json:
-        return jsonify(raw_json)
-    else:
-        return jsonify({"message": f"Raw JSON response not available for {ai_name} on this report."}), 404
+@app.route('/api/v1/reports/<int:report_id>/download')
+@login_required
+@limiter.limit("20 per hour")
+def download_analysis_report(report_id):
+    """Download analysis report as JSON"""
+    app.logger.info(f"JSON download requested: report {report_id} by {current_user.username}")
+    report = data_manager.get_report_by_id(report_id)
+    
+    if not report:
+        app.logger.warning(f"Report not found for download: {report_id}")
+        flash('Report not found.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    if report.user_id != current_user.user_id:
+        app.logger.warning(f"Unauthorized download attempt: report {report_id} by {current_user.username}")
+        flash('Unauthorized access.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    # Prepare report data for download
+    report_data = {
+        'report_id': report.report_id,
+        'company': {
+            'name': report.transcript.company.company_name if report.transcript.company else report.transcript.ticker_symbol,
+            'ticker': report.transcript.ticker_symbol,
+            'logo_url': report.transcript.company.logo_url if report.transcript.company else None
+        },
+        'transcript': {
+            'fiscal_year': report.transcript.fiscal_year,
+            'fiscal_quarter': report.transcript.fiscal_quarter,
+            'call_date': report.transcript.call_date.isoformat() if report.transcript.call_date else None,
+        },
+        'analysis_date': report.analysis_date.isoformat() if report.analysis_date else None,
+        'gemini': {
+            'summary': report.gemini_summary,
+            'concise_rationale': report.gemini_concise_rationale,
+            'overall_sentiment': report.gemini_overall_sentiment,
+            'management_confidence_score': report.gemini_management_confidence_score,
+            'evasiveness_score_q_a': report.gemini_evasiveness_score_q_a,
+            'key_topics_discussed': report.gemini_key_topics_discussed,
+            'red_flags_identified': report.gemini_red_flags_identified,
+            'request_ms': report.gemini_request_ms,
+        },
+        'chatgpt': {
+            'summary': report.chatgpt_summary,
+            'concise_rationale': report.chatgpt_concise_rationale,
+            'overall_sentiment': report.chatgpt_overall_sentiment,
+            'management_confidence_score': report.chatgpt_management_confidence_score,
+            'evasiveness_score_q_a': report.chatgpt_evasiveness_score_q_a,
+            'key_topics_discussed': report.chatgpt_key_topics_discussed,
+            'red_flags_identified': report.chatgpt_red_flags_identified,
+            'request_ms': report.chatgpt_request_ms,
+        },
+        'groq': {
+            'summary': report.groq_summary,
+            'concise_rationale': report.groq_concise_rationale,
+            'overall_sentiment': report.groq_overall_sentiment,
+            'management_confidence_score': report.groq_management_confidence_score,
+            'evasiveness_score_q_a': report.groq_evasiveness_score_q_a,
+            'key_topics_discussed': report.groq_key_topics_discussed,
+            'red_flags_identified': report.groq_red_flags_identified,
+            'request_ms': report.groq_request_ms,
+        }
+    }
+    
+    # Create filename
+    company_name = report.transcript.company.company_name if report.transcript.company else report.transcript.ticker_symbol
+    filename = f"{company_name.replace(' ', '_')}_Q{report.transcript.fiscal_quarter}_{report.transcript.fiscal_year}_Analysis.json"
+    
+    app.logger.info(f"JSON downloaded: report {report_id} by {current_user.username}")
+    
+    # Return as downloadable JSON
+    response = jsonify(report_data)
+    response.headers['Content-Disposition'] = f'attachment; filename={filename}'
+    response.headers['Content-Type'] = 'application/json'
+    
+    return response
 
+# -----------------------------------------------------
+# Agentic Bot Chat (Step 5)
+# -----------------------------------------------------
+
+def _get_or_create_bot(transcript_id: int) -> AgenticBot:
+    """Get or create a bot instance for the given transcript ID."""
+    if transcript_id in active_bots:
+        app.logger.debug(f"Reusing existing bot for transcript {transcript_id}")
+        return active_bots[transcript_id]
+    
+    try:
+        if not rag_manager:
+            app.logger.error("RAG Manager not initialized")
+            raise RuntimeError("RAG Manager not initialized")
+        
+        # Get transcript to verify it exists
+        transcript = data_manager.get_transcript_by_id(transcript_id)
+        if not transcript:
+            app.logger.error(f"Transcript {transcript_id} not found in database")
+            raise ValueError(f"Transcript {transcript_id} not found")
+        
+        app.logger.info(f"Creating new bot for transcript {transcript_id}")
+        
+        # Create new bot instance with RAG manager
+        bot = AgenticBot(
+            rag_manager=rag_manager,
+            transcript_id=transcript_id,
+            openai_model=DEFAULT_CHATGPT_MODEL,
+            google_api_key=os.environ.get("GOOGLE_API_KEY"),
+            google_cse_id=os.environ.get("GOOGLE_CSE_ID"),
+            user_id=str(current_user.user_id) if current_user.is_authenticated else None
+        )
+        
+        # Cache the bot instance
+        active_bots[transcript_id] = bot
+        app.logger.info(f"Bot created and cached for transcript {transcript_id}")
+        
+        return bot
+        
+    except Exception as e:
+        app.logger.error(f"Failed to create bot for transcript {transcript_id}: {e}", exc_info=True)
+        raise RuntimeError(f"Failed to create chatbot: {str(e)}") from e
+
+@app.route('/api/v1/chat', methods=['POST'])
+@login_required
+@limiter.limit("20 per minute")
+def chat_with_bot():
+    """Chat with an earnings call transcript using the agentic bot"""
+    try:
+        data = request.get_json()
+        transcript_id = data.get('transcript_id')
+        message = data.get('message', '').strip()
+        
+        app.logger.info(f"Chat request received - transcript_id: {transcript_id}, message length: {len(message) if message else 0}")
+        
+        if not transcript_id or not message:
+            app.logger.warning(f"Invalid request - transcript_id: {transcript_id}, message: {bool(message)}")
+            return jsonify({'error': 'Missing transcript_id or message'}), 400
+        
+        # Verify transcript exists
+        transcript = data_manager.get_transcript_by_id(transcript_id)
+        if not transcript:
+            app.logger.warning(f"Transcript not found: {transcript_id}")
+            return jsonify({'error': 'Transcript not found'}), 404
+        
+        # Check if RAG manager is available
+        if not rag_manager:
+            app.logger.error("RAG Manager not initialized")
+            return jsonify({'error': 'RAG system not available. Please ensure vector database is initialized.'}), 503
+        
+        app.logger.info(f"Processing chat for transcript {transcript_id}: {message[:50]}...")
+        
+        # Get or create bot for this transcript
+        try:
+            bot = _get_or_create_bot(transcript_id)
+            app.logger.info(f"Bot acquired for transcript {transcript_id}")
+        except Exception as bot_error:
+            app.logger.error(f"Failed to create bot for transcript {transcript_id}: {bot_error}", exc_info=True)
+            return jsonify({'error': f'Failed to initialize chatbot: {str(bot_error)}'}), 500
+        
+        # Get response from bot
+        try:
+            response = bot.invoke(message)
+            app.logger.info(f"Chat response generated for transcript {transcript_id}: {len(response)} chars")
+        except Exception as invoke_error:
+            app.logger.error(f"Bot invoke failed for transcript {transcript_id}: {invoke_error}", exc_info=True)
+            return jsonify({'error': f'Failed to generate response: {str(invoke_error)}'}), 500
+        
+        return jsonify({
+            'response': response,
+            'transcript_id': transcript_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Unexpected chat error: {e}", exc_info=True)
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+@app.route('/api/v1/transcripts/<int:transcript_id>/chat/stream', methods=['POST'])
+@login_required
+@limiter.limit("30 per hour")
+def stream_chat_with_transcript(transcript_id):
+    """Stream chat responses (for real-time UI)"""
+    app.logger.debug(f"Stream chat requested for transcript {transcript_id} by {current_user.username}")
+    transcript = data_manager.get_transcript_by_id(transcript_id)
+    if not transcript:
+        app.logger.warning(f"Transcript not found for stream chat: {transcript_id}")
+        return jsonify({"error": "Transcript not found"}), 404
+    
+    data = request.get_json()
+    user_message = data.get('message', '').strip()
+    
+    if not user_message:
+        return jsonify({"error": "Message is required"}), 400
+    
+    def generate():
+        try:
+            bot = _get_or_create_bot(transcript_id)
+            for chunk in bot.stream(user_message):
+                yield f"data: {chunk}\n\n"
+            app.logger.info(f"Stream chat completed for transcript {transcript_id}")
+        except Exception as e:
+            app.logger.error(f"Stream chat error for transcript {transcript_id}: {e}")
+            yield f"data: Error: {str(e)}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/api/v1/chat/history/<int:transcript_id>', methods=['GET'])
+@login_required
+@limiter.limit("30 per minute")
+def get_chat_history(transcript_id):
+    """Download conversation history for a transcript as JSON"""
+    try:
+        # Verify transcript exists and user has access
+        transcript = data_manager.get_transcript_by_id(transcript_id)
+        if not transcript:
+            app.logger.warning(f"Transcript not found for history download: {transcript_id}")
+            return jsonify({'error': 'Transcript not found'}), 404
+        
+        # Get conversation history
+        if transcript_id not in active_bots:
+            app.logger.info(f"No conversation history found for transcript {transcript_id}")
+            return jsonify({'history': [], 'message': 'No conversation history found'}), 200
+        
+        bot = active_bots[transcript_id]
+        history = bot.get_conversation_history()
+        
+        # Prepare download data
+        download_data = {
+            'transcript_id': transcript_id,
+            'company': {
+                'name': transcript.company.company_name if transcript.company else transcript.ticker_symbol,
+                'ticker': transcript.ticker_symbol,
+            },
+            'fiscal_info': {
+                'year': transcript.fiscal_year,
+                'quarter': transcript.fiscal_quarter,
+                'call_date': transcript.call_date.isoformat() if transcript.call_date else None,
+            },
+            'conversation': {
+                'total_turns': len(history),
+                'export_date': datetime.now(timezone.utc).isoformat(),
+                'user_id': current_user.user_id,
+                'username': current_user.username,
+                'turns': history
+            }
+        }
+        
+        # Create filename
+        company_name = transcript.company.company_name if transcript.company else transcript.ticker_symbol
+        filename = f"{company_name.replace(' ', '_')}_Q{transcript.fiscal_quarter}_{transcript.fiscal_year}_Conversation.json"
+        
+        app.logger.info(f"Chat history downloaded for transcript {transcript_id}: {len(history)} turns by {current_user.username}")
+        
+        # Return as downloadable JSON
+        response = jsonify(download_data)
+        response.headers['Content-Disposition'] = f'attachment; filename={filename}'
+        response.headers['Content-Type'] = 'application/json'
+        
+        return response
+        
+    except Exception as e:
+        app.logger.error(f"Failed to download chat history for transcript {transcript_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+# -----------------------------------------------------
+# Error Handlers
+# -----------------------------------------------------
 
 @app.errorhandler(404)
-def page_not_found(e) -> Response:
-    """
-    Handles 404 errors (Page Not Found).
-    Renders a custom 404 page and returns the 404 status code.
-    The 'e' parameter is the error object, which is required by Flask.
-    """
-    print(f"An error occurred: {e}")
+def page_not_found(e):
+    app.logger.warning(f"404 error: {request.path}")
     if request.path.startswith('/api/'):
-        response = jsonify({"error": "Not Found", "message": "The requested API endpoint does not exist."})
-        response.status_code = 404
-        return response
-    # Return an HTML response for non-API requests
-    return make_response(render_template('404.html'), 404)
+        return jsonify({"error": "Not Found"}), 404
+    return render_template('404.html'), 404
 
 @app.errorhandler(500)
-def internal_server_error(e) -> Response:
-    """
-    Handles 500 errors (Internal Server Error).
-    This is triggered by unhandled exceptions in your code.
-    Renders a custom 500 page and returns the 500 status code.
-    """
-    print(f"An internal server error occurred: {e}")
+def internal_server_error(e):
+    app.logger.error(f"500 error: {request.path}", exc_info=True)
     if request.path.startswith('/api/'):
-        response = jsonify({"error": "Internal Server Error", "message": "Something went wrong on the server."})
-        response.status_code = 500
-        return response
-    # Return an HTML response for non-API requests
-    return make_response(render_template('500.html'), 500)
+        return jsonify({"error": "Internal Server Error"}), 500
+    return render_template('500.html'), 500
 
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    app.logger.warning(f"Rate limit exceeded: {request.path} by {get_remote_address()}")
+    if request.path.startswith('/api/'):
+        return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
+    flash("Too many requests. Please slow down.", 'warning')
+    return redirect(url_for('dashboard'))
+
+# -----------------------------------------------------
+# Automatic cleanup of inactive bot sessions
+# -----------------------------------------------------
+
+def cleanup_inactive_bots():
+    """Background task to clean up inactive bot sessions"""
+    CLEANUP_INTERVAL = 3600  # 1 hour
+    MAX_IDLE_TIME = 7200  # 2 hours
+    
+    while True:
+        time.sleep(CLEANUP_INTERVAL)
+        try:
+            with app.app_context():
+                current_time = time.time()
+                bots_to_remove = []
+                
+                for transcript_id, bot in active_bots.items():
+                    # You'd need to add a last_activity timestamp to AgenticBot
+                    # For now, just log the count
+                    pass
+                
+                app.logger.info(f"Bot cleanup task: {len(active_bots)} active sessions")
+                
+        except Exception as e:
+            app.logger.error(f"Bot cleanup task error: {e}")
+
+# Start cleanup thread
+if not app.debug:
+    cleanup_thread = Thread(target=cleanup_inactive_bots, daemon=True)
+    cleanup_thread.start()
+    app.logger.info("Bot cleanup thread started")
+
+# -----------------------------------------------------
+# Application Startup
+# -----------------------------------------------------
 
 if __name__ == '__main__':
-    # Creating database tables if they don't exist yet
     with app.app_context():
-        db.create_all()
-        print("Database tables created/checked.")
-
-        test_user = data_manager.get_user_by_username("testuser")
-        if not test_user:
-            print("Seeding initial user data...")
-            test_user = data_manager.create_user("testuser", "test@example.com", "password123")
-            if test_user:
-                print(f"Test user '{test_user.username}' created.")
-            else:
-                print("Failed to create test user.")
-
-        if not data_manager.get_company_by_ticker("AAPL"):
-            print("Seeding initial company data...")
-            data_manager.add_company("AAPL", "Apple Inc.", "Technology", "Consumer Electronics", "NASDAQ", "https://placehold.co/50x50/000/fff?text=AAPL")
-            data_manager.add_company("MSFT", "Microsoft Corp.", "Technology", "Software", "NASDAQ", "https://placehold.co/50x50/000/fff?text=MSFT")
-            data_manager.add_company("GOOGL", "Alphabet Inc. (Google)", "Technology", "Internet Services", "NASDAQ", "https://placehold.co/50x50/000/fff?text=GOOGL")
-            print("Initial companies added.")
-
-        # Adding a dummy transcript for AAPL
-        aapl_transcript_2025_Q1 = data_manager.get_transcript_by_details("AAPL", 2025, 1)
-        if not aapl_transcript_2025_Q1:
-            print("Seeding initial transcript data for AAPL...")
-            dummy_transcript_text = """
-            Welcome to Apple's Q1 2025 Earnings Call.
-            CEO Tim Cook: We are pleased to announce a record quarter, driven by strong iPhone sales and continued growth in Services. Our innovation pipeline remains robust. We navigated a challenging macroeconomic environment with resilience.
-            CFO Luca Maestri: Revenue was $120 billion, up 5% year-over-year. Services revenue reached an all-time high of $25 billion. Gross margin was 45%. We returned $20 billion to shareholders through dividends and buybacks.
-            Analyst 1: Can you elaborate on the supply chain improvements and their impact on iPhone availability?
-            CEO Tim Cook: Our supply chain teams have done an incredible job. We've seen significant improvements, and availability is now much better across our product lines, especially for iPhone 16 Pro. We expect this trend to continue.
-            CFO Luca Maestri: China remains a very important market for us. We are seeing some localized challenges, but our long-term view remains positive. We are investing in local talent and partnerships to strengthen our position. We believe our product innovation will resonate with customers.
-            """
-            aapl_transcript_2025_Q1 = data_manager.add_transcript(
-                ticker_symbol="AAPL",
-                fiscal_year=2025,
-                fiscal_quarter=1,
-                call_date=date(2025, 2, 1),
-                raw_text=dummy_transcript_text,
-                speaker_segments=[
-                    {"speaker": "CEO Tim Cook", "text": "We are pleased to announce..."},
-                    {"speaker": "CFO Luca Maestri", "text": "Revenue was $120 billion..."},
-                    {"speaker": "Analyst 1", "text": "Can you elaborate..."},
-                    {"speaker": "CEO Tim Cook", "text": "Our supply chain teams..."},
-                    {"speaker": "Analyst 2", "text": "Regarding China..."},
-                    {"speaker": "CFO Luca Maestri", "text": "China remains a very important market..."}
-                ],
-                source_url=f"API-Ninjas:AAPL-2025-Q1"
-            )
-            if aapl_transcript_2025_Q1:
-                print("Initial AAPL transcript added.")
-            else:
-                print("Failed to add initial AAPL transcript.")
-
-        # Seeding a dummy analysis report for the seeded transcript
-        if aapl_transcript_2025_Q1 and test_user:
-            existing_report = data_manager.get_latest_report_for_user_and_transcript(test_user.user_id, aapl_transcript_2025_Q1.transcript_id)
-            if existing_report:
-                print(f"Dummy analysis report for Transcript ID {aapl_transcript_2025_Q1.transcript_id} already exists (Report ID: {existing_report.report_id}). Not re-seeding.")
-            else:
-                print("Seeding a dummy analysis report...")
-                data_manager.create_analysis_report(
-                    user_id=test_user.user_id,
-                    transcript_id=aapl_transcript_2025_Q1.transcript_id,
-                    gemini_summary="Gemini: Apple's quarter was strong due to iPhone and Services growth, with supply chain improvements. China faces challenges.",
-                    gemini_overall_sentiment="Positive",
-                    gemini_management_confidence_score=85,
-                    gemini_evasiveness_score_q_a=20,
-                    gemini_key_topics_discussed=["iPhone Sales", "Services Growth", "Supply Chain", "China Market"],
-                    gemini_red_flags_identified=["localized challenges (China)"],
-                    gemini_raw_response_json={"summary": "...", "overall_sentiment": "Positive"},
-                    chatgpt_summary="ChatGPT: Apple had a transformative quarter with resilient performance. Management was cautiously optimistic but avoided specific future guidance.",
-                    chatgpt_overall_sentiment="Neutral",
-                    chatgpt_management_confidence_score=70,
-                    chatgpt_evasiveness_score_q_a=60,
-                    chatgpt_key_topics_discussed=["Macroeconomic Headwinds", "Operational Efficiencies", "Future Guidance Evasiveness"],
-                    chatgpt_red_flags_identified=["not providing granular forward-looking revenue guidance"],
-                    chatgpt_raw_response_json={"summary": "...", "overall_sentiment": "Neutral"},
-                    groq_summary="Groq: None (placeholder)",
-                    groq_overall_sentiment=None,
-                    groq_management_confidence_score=None,
-                    groq_evasiveness_score_q_a=None,
-                    groq_key_topics_discussed=None,
-                    groq_red_flags_identified=None,
-                    groq_raw_response_json=None
-                )
-                print("Dummy analysis report seeded.")
-
-    app.run(debug=True)
+        try:
+            db.create_all()
+            app.logger.info("Database initialized")
+            
+            # Create test user
+            if not data_manager.get_user_by_username("testuser"):
+                data_manager.create_user("testuser", "test@example.com", "password123")
+                app.logger.info("Test user created")
+            
+            app.logger.info("Application ready")
+            
+        except Exception as e:
+            app.logger.error(f"Initialization error: {e}", exc_info=True)
+    
+    app.run(debug=True, host='0.0.0.0', port=5000)
