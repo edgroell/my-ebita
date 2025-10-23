@@ -1,0 +1,453 @@
+# RAG (Retrieval-Augmented Generation) with LangChain
+
+import sys
+from pathlib import Path
+import os
+import re
+from typing import List, Dict, Any, Optional
+
+from dotenv import load_dotenv
+
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+load_dotenv()
+
+class RAGManager:
+    """
+    Manages the RAG (Retrieval-Augmented Generation) process using LangChain.
+    """
+
+    def __init__(self, vector_store: Any, chatgpt_service: Any | None = None):
+        """
+        Initialize RAG Manager with vector store and ChatGPT service.
+        
+        Args:
+            vector_store: The vector store instance for similarity search
+            chatgpt_service: ChatGPTService instance (required for summarization)
+        """
+        self.vector_store = vector_store
+        self.chatgpt_service = chatgpt_service
+
+    def _summarize_executive_overview(self, executive_overview: str) -> str:
+        """
+        Requests agent to summarize the executive overview section of the transcript.
+
+        Args:
+            executive_overview (str): The executive overview section to summarize.
+
+        Returns:
+            str: The summarized executive overview. If no summary is found, returns the original text.
+        """
+        user_instructions = (
+            "As context, you are provided with the executive overview section of an earnings call transcript. "
+            "Please provide a summary of this section, containing all the most important points. "
+            "This summary will be a chunk used for retrieval in a RAG system, hence it should be more or less 1000 tokens."
+        )
+
+        if self.chatgpt_service is None:
+            print("Warning: chatgpt_service is not available; returning original executive overview.")
+            return executive_overview
+
+        try:
+            response = self.chatgpt_service.call_agent(
+                messages=[
+                    {"role": "system", "content": "You are a financial analyst AI specializing in dissecting earnings call transcripts."},
+                    {"role": "user", "content": f"Context:\n{executive_overview}\n\nQuestion:\n{user_instructions}"}
+                ],
+                max_completion_tokens=2500
+            )
+        except Exception as exc:
+            print("Warning: chatgpt_service.call_agent failed:", exc)
+            return executive_overview
+
+        summarized_executive_overview = response
+        return summarized_executive_overview if summarized_executive_overview else executive_overview
+
+    def split_transcript(self, full_transcript: List[Dict[str, Any]]) -> list[str]:
+        """
+        Splits a transcript string into chunks, with each chunk starting after
+        an 'Operator:' line.
+
+        Args:
+            transcript (str): The full transcript string.
+
+        Returns:
+            list[str]: A list of strings, where each string is a conversation chunk.
+        """
+        transcript = ""
+        
+        for item in full_transcript:
+            transcript = item.get("transcript") or ""
+
+        operator_indices = [match.start() for match in re.finditer(r'Operator: ', transcript)]
+
+        if not operator_indices:
+            return [transcript]
+
+        all_splits = []
+        all_splits.append(transcript[:operator_indices[0]].strip())
+
+        for i in range(len(operator_indices)):
+            start_index = operator_indices[i]
+            end_index = operator_indices[i+1] if i + 1 < len(operator_indices) else len(transcript)
+            all_splits.append(transcript[start_index:end_index].strip())
+        
+        cleaned_splits = [split for split in all_splits if split]
+        
+        summarized_executive_overview = self._summarize_executive_overview(cleaned_splits[0])
+        cleaned_splits[0] = summarized_executive_overview
+        
+        return cleaned_splits
+    
+    def add_texts(
+        self,
+        texts: List[str],
+        transcript_id: int,  # REQUIRED now
+        base_metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        """
+        Add texts to the vector store with transcript metadata.
+        
+        Args:
+            texts: List of text chunks to add
+            transcript_id: Required transcript ID for filtering
+            base_metadata: Optional additional metadata to include
+        """
+        metadatas = []
+        for i, _ in enumerate(texts):
+            md = {"transcript_id": transcript_id, "chunk_index": i}
+            if base_metadata:
+                md.update(base_metadata)
+            metadatas.append(md)
+
+        return self.vector_store.add_texts(texts=texts, metadatas=metadatas)
+
+    def retrieve_context(self, query: str, transcript_id: int | None = None, top_k: int = 5) -> List[Any]:
+        """
+        Retrieve relevant context from vector store.
+        If transcript_id is provided, filter results to only that transcript.
+        """
+        if not self.vector_store:
+            return []
+        
+        try:
+            filter_dict = None
+            if transcript_id is not None:
+                filter_dict = {"transcript_id": transcript_id}
+
+            if hasattr(self.vector_store, 'similarity_search'):
+                return self.vector_store.similarity_search(query, k=top_k, filter=filter_dict)
+            
+            return []
+        
+        except Exception as e:
+            print(f"Error retrieving context: {e}")
+            return []
+
+    def build_context_text(self, docs: List[Any]) -> str:
+        """Build a single context string from retrieved documents."""
+        return "\n\n".join(doc.page_content for doc in docs)
+
+
+# TESTING
+if __name__ == "__main__":
+    from services_ai.vector_store import ChromaVectorStore
+    from services_api.chatgpt_service import ChatGPTService
+
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+    vector_store = ChromaVectorStore(
+        collection_name="transcripts",
+        persist_directory="data/chroma_langchain_db",
+        api_key=OPENAI_API_KEY,
+        embedding_model="text-embedding-3-small"
+    )
+
+    # Create ChatGPT service and inject it
+    if OPENAI_API_KEY is None:
+        print("Error: OPENAI_API_KEY environment variable not set. ChatGPTService will not be initialized.")
+        chatgpt_service = None
+    else:
+        chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY, model_name="gpt-4o-mini")
+    rag_manager = RAGManager(vector_store=vector_store, chatgpt_service=chatgpt_service)
+
+    full_transcript = [
+        {
+            "date": "2025-04-30",
+            "transcript": "Operator: Greetings, and welcome to the Microsoft Fiscal Year 2025 Third Quarter Earnings Conference Call. At this time, all participants are in a listen-only mode. A question-and-answer session will follow the formal presentation. As a reminder, this conference is being recorded. It is now my pleasure to introduce Jonathan Neilson, Vice President of Investor Relations. Please go ahead.\nJonathan Neilson: Good afternoon, and thank you for joining us today. On the call with me are Satya Nadella, Chairman and Chief Executive Officer; Amy Hood, Chief Financial Officer; Alice Jolla, Chief Accounting Officer; and Keith Dolliver, Corporate Secretary and Deputy General Counsel. On the Microsoft Investor Relations website, you can find our earnings press release and financial summary slide deck, which is intended to supplement our prepared remarks during today’s call and provides the reconciliation of differences between GAAP and non-GAAP financial measures. More detailed outlook slides will be available on the Microsoft Investor Relations website when we provide outlook commentary on today’s call. On this call, we will discuss certain non-GAAP items. The non-GAAP financial measures provided should not be considered as a substitute for or superior to the measures of financial performance prepared in accordance with GAAP. They are included as additional clarifying items to aid investors in further understanding the company's third quarter performance in addition to the impact these items and events have on the financial results. All growth comparisons we make on the call today relate to the corresponding period of last year unless otherwise noted. We will also provide growth rates in constant currency, when available, as a framework for assessing how our underlying businesses performed, excluding the effect of foreign currency rate fluctuations. Where growth rates are the same in constant currency, we will refer to the growth rate only. We will post our prepared remarks to our website immediately following the call until the complete transcript is available. Today's call is being webcast live and recorded. If you ask a question, it will be included in our live transmission, in the transcript, and in any future use of the recording. You can replay the call and view the transcript on the Microsoft Investor Relations website. During this call, we will be making forward-looking statements which are predictions, projections, or other statements about future events. These statements are based on current expectations and assumptions that are subject to risks and uncertainties. Actual results could materially differ because of factors discussed in today's earnings press release, in the comments made during this conference call, and in the risk factor section of our Form 10-K, Forms 10-Q, and other reports and filings with the Securities and Exchange Commission. We do not undertake any duty to update any forward-looking statement. And with that, I’ll turn the call over to Satya.\nSatya Nadella: Thank you, Jonathan. It was a record quarter, driven by continued strength of Microsoft Cloud, which surpassed $42 billion in revenue, up 22% in constant currency. Cloud and AI are the essential inputs for every business to expand output, reduce costs, and accelerate growth. Now, I will highlight examples, starting with infrastructure. We continue to expand our data center capacity. This quarter alone, we opened DCs in 10 countries across four continents. Model capabilities are doubling in performance every six months, thanks to multiple, compounding scaling laws. We continue to optimize and drive efficiencies across every layer – from DC design, to hardware and silicon, to systems software, to model optimization – all towards lowering costs and increasing performance. You see this in our supply chain, where we have reduced dock-to-lead times for new GPUs by nearly 20%. Across our blended fleet, where we have increased AI performance by nearly 30% ISO power. And, our cost per token, which has more than halved. When it comes to cloud migrations, we saw accelerating demand, with customers in every industry, from Abercrombie & Fitch Co., to Coca-Cola and ServiceNow, expanding their footprints on Azure. And we remain the cloud of choice for customers’ mission critical VMWare, SAP, and Oracle workloads, with more regional availability than any other hyperscaler. We are also excited about the next frontier in cloud systems with quantum. In addition to putting our quantum stack on machines from our partners, we are also making real progress on a path to a utility scale quantum computer with the introduction of Majorana-1. When it comes to data and analytics, we have deeply integrated our AI platform with our data stack. PostgreSQL usage accelerated for the third consecutive quarter, and it is now used by nearly 60% of the Fortune 500 including companies like BMW and BNY Mellon. Cosmos DB revenue growth also accelerated again this quarter and remains the go-to database for globally distributed NoSQL workloads at any scale. It is used by customers in every industry like CarMax, DocuSign, NTT Data, and OpenAI. This quarter, we also saw analytics consumption accelerate. Microsoft Fabric has more than 21,000 paid customers, up 80% year-over-year. Fabric brings together data workloads like data warehousing, data science, real-time intelligence, along with Power BI, into one end-to-end solution. Real-time intelligence is now the fastest growing workload in Fabric, with 40% of customers already using it just five months since becoming generally available. All up, more than 50% of Fabric customers – like Amore Pacific, Louisiana state government, and Petrobras – use three or more workloads. And the amount of data in our multi-cloud data lake OneLake has grown more than 6X over the past year. Now, on to AI platforms and tools. Foundry is the agent and AI app factory. It is now used by developers at over 70,000 enterprises and digital natives – from Atomicwork, to Epic, Fujitsu, and Gainsight, to H&R Block and LG Electronics – to design, customize, and manage their AI apps and agents. We processed over 100 trillion tokens this quarter, up 5X year-over-year – including a record 50 trillion tokens last month alone. And four months in, over 10,000 organizations have used our new Agent Service to build, deploy, and scale their agents. This quarter we also made a new suite of fine-tuning tools available to customers with industry-leading reliability. And we brought the latest models from OpenAI, along with new models from Cohere, DeepSeek, Meta, Mistral, Stability to Foundry. And we have expanded our Phi family of SLMs with new multimodal and mini models. All up, Phi has been downloaded 38 million times. And our research teams are taking it one step further, with BitNet b1.58, a billion parameter large language model that can run on just CPUs, coming to the Foundry. Now, on to developer tools. We are evolving GitHub Copilot from pair to peer programmer. With agent mode in VS Code, Copilot can now iterate on code, recognize errors, and fix them automatically. This adds to other Copilot agents like Autofix, which helps developers remediate vulnerabilities, as well as Code Review Agent, which has already reviewed over 8 million pull requests. And we are previewing a first-of-its-kind SWE agent capable of asynchronously executing developer tasks. All-up, we now have over 15 million GitHub Copilot users, up over 4X year-over-year. And both digital natives like Twilio and enterprises like Cisco, HPE, SkyScanner, and Target, continue to choose GitHub Copilot to equip their developers with AI throughout the entire dev lifecycle. With Visual Studio and VS Code, we have the world’s most popular editor, with over 50 million monthly active users. And with Power Platform we have the leading low code platform for AI makers too. We now have 56 million monthly active Power Platform users, up 27% year-over-year, who increasingly use our AI features to build apps and automate processes. Now, on to the future of work. Microsoft 365 Copilot is built to facilitate human-agent collaboration. Hundreds of thousands of customers across geographies and industries now use Copilot, up 3X year-over-year. Our overall deal size continues to grow, and this quarter, we saw a record number of customers returning to buy more seats. And we are going further. Just last week, we announced a major update, bringing together agents, notebooks, search, and create into a new scaffolding for work. Our new Researcher and Analyst deep reasoning agents analyze vast amounts of web and enterprise data to deliver highly-skilled expertise on demand directly within Copilot. Beyond horizontal knowledge work, we are introducing agents for every role and business process. Our Sales Agent turns contacts into qualified leads, and with Sales Chat reps can quickly get up to speed on new accounts. And our Customer Service Agent is deflecting customer inquiries and helping service reps resolve issues faster. With Copilot Studio, customers can extend Copilot and build their own agents with no-code/low code. More than 230,000 organizations – including 90% of the Fortune 500 – have already used Copilot Studio. With deep reasoning and agent flows in Copilot Studio, customers can build agents that perform more complex tasks, and also handle deterministic scenarios like document processing and financial approvals. And they can now build “computer use” agents that take action on the UI across desktop and web apps. And, with just a click, they can turn any SharePoint site into an agent too. This quarter alone, customers created over 1 million custom agents across SharePoint and Copilot Studio, up 130% quarter-over-quarter. When it comes to business applications, Dynamics 365 again took share as companies like Avaya, Brunswick, SoftCat, switched to Dynamics from legacy providers. Verizon, for example, chose Dynamics 365 Sales to improve the efficiency of its sellers. In healthcare, Dragon Copilot is off to a fast start. Last quarter alone, we helped document nearly 9.5 million physician-patient encounters at providers like City of Hope, Ottawa Hospital, Tufts Medicine and WellStar, up over 50% quarter-over-quarter. In manufacturing, we introduced Factory Operations and Safety Agents at Hannover Messe. And leading partners like Autodesk, PTC, and Siemens have all built their own industrial AI solutions on our stack. And, in retail, we have introduced agents to help customers like Bath & Body Works build more personalized shopping experiences and improve store operations. When it comes to Windows, Copilot+ PCs are faster and have better battery life than other devices in their category. We also continue to win new customers with best-in-class AI capabilities. We offer a growing number of AI apps from partners like Adobe, Canva, and Zoom. Just last week, we rolled out exclusive AI experiences like Recall, Click to Do, and Windows Search, to all Copilot+ PCs. And we continue to see increased commercial traction as we approach end-of-support for Windows 10. Windows 11 commercial deployments increased nearly 75% year-over-year. Now, on to security. Security is our top priority, and we have made significant progress against the engineering objectives we outlined a year and a half ago as part of our Secure Future Initiative. We are now applying these learnings to deliver new innovation across our platform. Last month, along with our partners, we introduced Security Copilot agents to help defenders autonomously handle high-volume security and IT tasks, informed by 84 trillion daily threat signals. We also added new capabilities to Defender, Entra, and Purview to help organizations secure and govern their AI deployments. All up, we now have 1.4 million security customers. Over 900,000 – including EY Global, Manpower Group, TriNet, Regions Bank – have 4 or more workloads, up 21% year-over-year. And, in identity, Entra now has more than 900 million monthly active users. Now, on to our consumer businesses, starting with LinkedIn. Over one billion professionals use LinkedIn to connect, learn, hire, and sell – and our membership continues to grow at double digits year-over-year. Time spent watching videos on the platform was up 36%, and comments were up 32% year-over-year. We are also seeing more members use AI to gain new skills and find jobs. The number of learners who have used AI-powered coaching increased over 2X quarter-over-quarter. And we remain the market leader in hiring, as customers like Equinix and Verizon use LinkedIn Hiring Assistant to find qualified candidates faster. When it comes to LinkedIn Premium, we saw over 75% quarter-over-quarter subscriber growth to our Premium Pages offering for SMBs. And LinkedIn Marketing Solutions continues to be the best way to reach B2B decision makers, with two consecutive quarters of accelerated revenue growth. More broadly, when it comes to advertising, we are transforming how people search, browse, discover content, and use AI as a personal assistant. With Copilot Search in Bing, we are reimagining search results with overview pages curated by AI, and embedded conversational capabilities. With Copilot Vision in Edge, Copilot sees what you see and gives you real-time responses while you browse. With Copilot Discover, we are personalizing the MSN experience, based on user interactions and preferences. And with our updated Copilot app, we are focused on building daily engagement and successful sessions across a range of modalities, whether it is conversing, searching, shopping, or travel planning. All up, we again took share across Bing and Edge. And our total advertising revenue across our businesses has surpassed $20 billion over the last 12 months. Now, on to gaming. We continue to transform the business and focus on margin expansion, as we bring our games to over 500 million monthly active users across devices. We ended the quarter as the top publisher by pre-orders and pre-installs on both Xbox and the PlayStation Store. PC Game Pass revenue increased over 45% year-over-year. With Xbox Play Anywhere, players now can access more than 1,000 games they can play across console and PC. And just last week we brought cloud gaming to LG TVs. Cloud gaming set a new record, surpassing 150 million hours played for the first time this quarter. We are also integrating AI across Xbox. New Copilot for Gaming is a personalized gaming companion that provides in-game assistance and expert coaching. And our first of its kind Muse model can generate gameplay in real-time. Finally, it is fantastic to see the success of Minecraft Movie which is the top grossing film of the year. In addition to monetizing our IP in new ways, we have seen a 75 percent-plus increase in weekly active users of the game year-over-year since the release. In closing, we are rapidly innovating to expand our opportunity across both consumer and commercial businesses. In just a few weeks, at our Build conference, we will share how we’re creating the most powerful AI platform for developers—and I encourage you to tune in. With that, let me turn it over to Amy.\nAmy Hood: Thank you, Satya, and good afternoon everyone. This quarter, revenue was $70.1 billion, up 13% and 15% in constant currency. Gross margin dollars increased 11% and 13% in constant currency while operating income increased 16% and 19% in constant currency. And earnings per share was $3.46, an increase of 18% and 19% in constant currency. Results exceeded expectations driven by focused execution from our sales and partner teams. We continue to see strong demand for our cloud and AI offerings as they help customers drive productivity, increase efficiencies, and grow their businesses. And, again this quarter, revenue from our AI business was above expectations. Commercial bookings increased 18% and 17% in constant currency, significantly ahead of expectations again this quarter, driven by an Azure commitment from OpenAI. We also saw consistent execution across our core annuity sales motions and continued long-term commitments to our platform. Commercial remaining performance obligation increased to $315 billion, up 34% and 33% in constant currency. Roughly 40% will be recognized in revenue in the next 12 months, up 17% year over year. The remaining portion, recognized beyond the next 12 months, increased 47%. And this quarter, our annuity mix was 98%. FX was roughly in line with expectations on total company revenue, segment level revenue, and operating expense growth. FX decreased COGS growth by only 1 point, 1 point unfavorable to expectations. Microsoft Cloud revenue was $42.4 billion, ahead of expectations, and grew 20% and 22% in constant currency. Microsoft Cloud gross margin percentage was 69%, in line with expectations, and decreased 3 points year over year driven by the impact of scaling our AI infrastructure. Company gross margin percentage was also 69%, down 1 point year over year driven by scaling our AI infrastructure. Operating expenses increased 2% and 3% in constant currency, lower than expected due to our focus on cost efficiencies as well as investments that shifted to Q4. Operating margins increased 1 point year over year to 46%, better than expected as we continue to focus on building high-performing teams and increasing our agility by reducing layers with fewer managers. At a total company level, headcount at the end of March was 2% higher than a year ago and was down slightly compared to last quarter. Now to our segment results. Revenue from Productivity and Business Processes was $29.9 billion and grew 10% and 13% in constant currency, ahead of expectations driven by LinkedIn, Microsoft 365 commercial products, and Microsoft 365 consumer. M365 commercial cloud revenue increased 12% and 15% in constant currency, in line with expectations driven by E5 and M365 Copilot. With M365 Copilot, we continue to see growth across customer segments and geos. Paid M365 commercial seats grew 7% year over year to over 430 million. While we continue to see installed base expansion across all customer segments, growth was primarily driven by our small and medium business and frontline worker offerings. M365 commercial products revenue increased 5% and 8% in constant currency, ahead of expectations due to higher-than-expected Office transactional purchasing. M365 consumer cloud revenue increased 10% and 12% in constant currency, ahead of expectations driven by higher-than-expected subscription growth following the January price increase. M365 consumer subscriptions grew 9% to 87.7 million. LinkedIn revenue increased 7% and 8% in constant currency. Results were ahead of expectations due to better-than-expected performance across all businesses. The Talent Solutions business continues to be impacted by weakness in the hiring market. Dynamics 365 revenue increased 16% and 18% in constant currency, in line with expectations with continued growth across all workloads. Segment gross margin dollars increased 10% and 13% in constant currency and gross margin percentage was relatively unchanged year over year even with the impact of scaling our AI infrastructure. Operating expenses increased 1% and 2% in constant currency and operating income increased 15% and 18% in constant currency. Next, the Intelligent Cloud segment. Revenue was $26.8 billion and grew 21% and 22% in constant currency, ahead of expectations driven by Azure. In Azure and other cloud services, revenue grew 33% and 35% in constant currency including 16 points from AI services. Focused execution drove non-AI services results where we saw accelerated growth in our enterprise customer segment as well as some improvement in our scale motions. And, in Azure AI services, we brought capacity online faster than expected. In our on-premises server business, revenue decreased 6% and 4% in constant currency, slightly below expectations driven by renewals with lower in-period revenue recognition from the mix of contracts. The year over year decline is reflective of the continued customer shift to cloud offerings. Enterprise and partner services revenue increased 5% and 6% in constant currency, slightly ahead of expectations due to better-than-expected performance in Enterprise Support Services. Segment gross margin dollars increased 13% and 14% in constant currency and gross margin percentage decreased 4 points year over year driven by scaling our AI infrastructure. Operating expenses increased 6% and 7% in constant currency and operating income grew 17% and 18% in constant currency. Now to More Personal Computing. Revenue was $13.4 billion and grew 6% and 7% in constant currency, ahead of expectations due to better-than-expected results across all businesses. Windows OEM and Devices revenue increased 3% year over year, ahead of expectations as tariff uncertainty through the quarter resulted in inventory levels that remained elevated. Search and news advertising revenue ex-TAC increased 21% and 23% in constant currency. Results were significantly ahead of expectations driven by usage from a third-party partnership, better-than-expected rate expansion, and volume growth across Edge and Bing. And in Gaming, revenue increased 5% and 6% in constant currency. Xbox content and services revenue increased 8% and 9% in constant currency, ahead of expectations driven by stronger-than-expected performance in third-party and first-party content. Segment gross margin dollars increased 9% and 11% in constant currency. Gross margin percentage increased 2 points year over year driven by strong execution on margin improvement in Search and Gaming. Operating expenses increased 1%. Operating income increased 21% and 23% in constant currency driven by continued prioritization of higher margin opportunities. Now back to total company results. Capital expenditures including finance leases were $21.4 billion, slightly lower than expected due to normal variability from the timing of delivery of data center leases. Cash paid for PP&E was $16.7 billion. Roughly half of our cloud and AI related spend was on long-lived assets that will support monetization over the next 15 years and beyond. The remaining cloud and AI spend was primarily for servers, both CPUs and GPUs, to serve customers based on demand signals including our customer contracted backlog of $315 billion. Cash flow from operations was $37 billion, up 16% driven by strong cloud billings and collections, partially offset by higher tax payments. And this quarter, free cash flow was $20.3 billion. Other income and expense was negative $623 million, more favorable than anticipated primarily due to net gains on derivatives and investments. Our losses on investments accounted for under the equity method were slightly higher than expected. Our effective tax rate was approximately 18%. And finally, we returned $9.7 billion to shareholders through dividends and share repurchases, an increase of 15% year over year. Now, moving to our Q4 outlook, which unless specifically noted otherwise, is on a US dollar basis. First, thru April, demand signals across our commercial businesses as well as in LinkedIn, Gaming, and Search have remained consistent. Our outlook assumes those trends continue in Q4. If the environment changes, our results may be impacted. In our Windows OEM business, our outlook assumes the elevated inventory levels from Q3 will come down in Q4. We have widened our guidance range in our More Personal Computing segment to account for some of this variability. Next, FX. With the weakening of the US dollar in April, we now expect FX to increase total revenue growth by one point. Within the segments, we expect FX to increase revenue growth by one point in Productivity and Business Processes and less than one point in Intelligent Cloud and More Personal Computing. We expect FX to increase COGS and operating expense growth by less than one point. In commercial bookings, we expect solid growth on a significant prior year comparable and a growing expiry base. Bookings growth will be driven by strong execution across our core annuity sales motions and continued long-term commitments to our platform. As a reminder, larger longer-term Azure contracts, which are more unpredictable in their timing, can drive increased quarterly volatility in our bookings growth rate. Microsoft Cloud gross margin percentage should be roughly 67%, down year over year primarily driven by the impact of scaling our AI infrastructure. And now, capital expenditures. We expect Q4 capital expenditures to increase on a sequential basis. H2 capex in total remains unchanged from our January H2 guidance. As a reminder, there can be quarterly spend variability from cloud infrastructure buildouts and the timing of delivery of finance leases. Next to segment guidance. In Productivity and Business Processes we expect revenue of $32.05 to $32.35 billion, or growth of 11% to 12% in constant currency. M365 commercial cloud revenue growth should be approximately 14% in constant currency, relatively stable compared to the prior quarter. We expect continued ARPU growth thru E5 and M365 Copilot and some seat growth moderation given the size of the installed base. M365 commercial products revenue growth should be in the mid-single digits. As a reminder, M365 commercial products includes both the Windows Commercial on-premises components of M365 suites and Office transactional purchasing, both of which can be variable due to in period revenue recognition dynamics. M365 consumer cloud revenue growth should be in the mid-teens driven by the January price increase. For LinkedIn, we expect revenue growth in the high single digits. And in Dynamics 365, we expect revenue growth to be in the mid to high teens with continued growth across all workloads. For Intelligent Cloud we expect revenue of $28.75 to $29.05 billion or growth of 20% to 22% in constant currency. Revenue will continue to be driven by Azure which, as a reminder, can have quarterly variability primarily from in-period revenue recognition depending on the mix of contracts. In Azure, we expect Q4 revenue growth to be between 34% and 35% in constant currency driven by strong demand for our portfolio of services. In our non-AI services, we expect focused execution to continue driving healthy growth. In our AI services, while we continue to bring datacenter capacity online as planned, demand is growing a bit faster. Therefore, we now expect to have some AI capacity constraints beyond June. In our on-premises server business, we again expect revenue to decline in the mid-single digits with the ongoing customer shift to cloud offerings. And in Enterprise and partner services, we expect revenue growth to be in the mid to high single digits driven by Enterprise Support Services. In More Personal Computing, we expect revenue to be $12.35 to $12.85 billion. Windows OEM and Devices revenue should decline in the mid to high single digits. We expect Windows OEM revenue to decline in the low to mid-single digits assuming OEM inventory levels come down thru the quarter as noted earlier, although the range of potential outcomes is wider than normal. Devices revenue should decline in the high teens. Search and news advertising ex-TAC revenue growth should be in the high teens, even on a strong prior year comparable. We expect to see continued growth in both volume and revenue per search with share gains across Edge and Bing. Overall Search and news advertising revenue growth should be in the mid-teens. And in Gaming, we expect revenue growth to be in the mid-single digits. We expect Xbox content and services revenue growth to be in the high single digits driven by first-party content. Now back to company guidance. We expect COGS of $23.6 to $23.8 billion or growth of 19% to 20% in constant currency and operating expense of $18 to $18.1 billion or growth of approximately 5% in constant currency. Therefore, even with ongoing AI investments as we scale, we continue to expect full-year FY25 operating margins to be up slightly year over year. Other income and expense is expected to be roughly negative $1.2 billion primarily driven by investments accounted for under the equity method. As a reminder, we do not recognize mark-to-market gains or losses on equity method investments. And lastly, we expect our Q4 effective tax rate to be approximately 19%. Now I’d like to share some closing thoughts as we look to the next fiscal year. We remain committed to investing against the strong demand signals we see for our services. So, as a reminder, our earlier comments on FY26 capital expenditures remain unchanged. We expect capex to grow, it will grow at a lower rate than FY25 and will include a greater mix of short-lived assets which are more directly correlated to revenue than long-lived assets. These investments, along with focused execution that delivers near-term value to our customers, will ensure we continue to lead through the cloud and AI opportunity ahead. With that, let’s go to Q&A, Jonathan.\nJonathan Neilson: Thanks, Amy. We’ll now move over to Q&A. Out of respect for others on the call, we request that participants please only ask one question. Operator, can you please repeat your instructions?\nOperator: [Operator instructions]\nKeith Weiss, Morgan Stanley: Excellent. Thank you guys for taking the question, and congratulations on a fantastic quarter in what all of us are looking at as a difficult environment, a lot of uncertainty out there, so really impressive to put up the results that you guys did. One of the things that we heard a lot about this quarter in the media and press reports was changing data center commitments, maybe Microsoft walking away from some of those data center commitments. But it sounds like the AI demand is very strong. You’re talking about not being able to hit all that demand with supply. Can you talk to us about what’s going on with your datacenter strategy? Are there any shifts taking place? And maybe in particular, Satya, you could talk about some of the comments that you had made about the potential risk for oversupplies and GPUs out in the future. What exactly was that risk you were talking about? And are you incorporating that risk into your datacenter strategy?\nSatya Nadella: Yeah. First of all, thanks, Keith, for the questions. The reality is, we’ve always been making adjustments to build, lease, what pace we build, all through the last 10-15 years. It’s just that you all pay a lot more attention to what we do quarter over quarter nowadays. Having said that, the key thing for us is to have our builds and lease be positioned for what is the workload growth of the future. That’s what you have to go and seek to. There’s a demand part to it. There is the shape of the workload part to it, and there is a location part to it. You don’t want to be upside-down on having one big data center in one region, when you have a global demand footprint. You don’t want to be upside-down when the shape of demand changes, because, after all, with essentially pre-training plus test time compute, that’s a big change in terms of how you think about even what is training. Forget inferencing. Fundamentally, given all of that, and then every time there’s great Moore’s Law, but remember, this is a compounding S-curve, which is, there’s Moore’s Law, there’s system software, there’s model architecture changes, there’s the app server efficiency. Given all of that, we just want to make sure we’re building, accounting for the latest and greatest information we have on all of that. And that’s what you see reflected, and I feel very, very good about the pace. In fact, Amy just mentioned, we will be short power. And so, therefore, but it’s not power. It’s not a blanket statement. I need power in specific places so that we can either lease or build at the pace at which we want. And so, that’s the plan that we’re executing. Maybe, Amy, you can add to that.\nAmy Hood: Yeah, maybe just to add a little bit to Satya’s comments, just a reminder, these are very long lead time decisions. From land to build to buildouts can be lead times of five to seven years, two to three years. We’re constantly in a balancing position as we watch demand curves and many of things Satya watched. And the second part is just to maybe remind you, when Satya talks about being short power, he’s really talking about data center space. And so, we’ve continued through the second half to put things in place. In fact, we talked a little bit about pulling even some of that space to be ready earlier and being able to deliver that earlier to customers this quarter, which is really good work by the teams, as we continue to get more and more efficient at that process. And I look forward to being able to continue to do that in the future. I did talk about in my comments, we had hoped to be in balance by the end of Q4. We did see some increased demand, as you saw through the quarter. We are going to be a little short, still, a little tight as we exit the year, but are encouraged by that.\nKeith Weiss: Excellent. Thank you, guys.\nJonathan Neilson: Thanks, Keith. Operator, next question, please.\nOperator: [Operator instructions]\nBrent Thill, Jefferies: Thanks. Satya, on your comment about accelerating demand for cloud migrations, I’m curious if you could dig in and extrapolate a little more what you’re seeing there. Thank you.\nSatya Nadella: Thanks, Brent. Yeah, I sort of think about three big things that are happening in the cloud, all at parallel, and there is also a relationship between them. One is, I’ll just say, the classic migration of whether it’s SQL, Windows Server. And so, that’s, again, got good steady state progress, because the reality is, I think everyone’s now, perhaps there’s another kick in the datacenter migrations, just because of the efficiency the cloud provides. That’s one part. The second piece is good data growth. You saw Postgres on Azure. I mean, forgetting SQL Server, Postgres on Azure is growing. Cosmos is growing, the analytic stuff I talked about with Fabric. It’s even the others, whether it is Databricks or even Snowflake on Azure are growing. We feel very good about Fabric growth and our data growth. Then the cloud-native growth, this is, again, before we even get to AI, some of the core compute consumption of cloud-native players is also very healthy. It was healthy throughout the quarter. We projected to go moving forward as well. Then the thing to notice is the ratio, and I think we’ve mentioned this multiple times before. If you look underneath even ChatGPT, in fact, that team does a fantastic job of thinking about not only their growth in terms of AI accelerators they need. They use Cosmos DB. They use Postgres. They use core compute and storage. And so, there’s even a ratio between any AI workload in terms of AI accelerator to others. Those are the four pockets, I would say, or four different trend lines, which all have a relationship with each other. And if I step back, and Amy and I talk a lot about this, this time around, there’s nothing certain for sure in the future, except for one thing, which is our largest business is our infrastructure business. And the good news here is the next big platform shift builds on that. It’s not a complete rebuild, having gone through some of these platform shift, where you have to come out on the other side with a full rebuild. If there is good news here, it’s that we have a good business in Azure that continues to grow, and the new platform depends on that. We want to stay disciplined and execute super well on that.\nBrent Thill: Thank you.\nJonathan Neilson: Thanks, Brent. Operator, next question, please.\nOperator: [Operator instructions]\nMark Moerdler, Bernstein: Thank you very much for taking my question, and I will reiterate what my peers have said. Congratulations on the great quarter. Satya and Amy, Microsoft is a very different business than it was during the last recession. Incredible job you’ve done. If we get into a recession, and I hope we don’t, how do you think about the stability, the sustainability, revenue volatility of Microsoft today, if we were to get into recession? Would the business react early to recession or late? Would a recession have a more shallow impact on revenue? Any thoughts would be appreciated.\nSatya Nadella: Maybe I’ll start and then Amy should add, Mark. The way, at least, I think we will approach it is, quite frankly, be very focused on how we help our customers if there is any turbulence in the macro, because one of the things that we feel we can do, just because of the efficiencies of the cloud, and the footprint we have and the differentiated layers of the stack, from the SaaS application side to the infrastructure side, I think if you buy into the argument that software is the most malleable resource we have to fight any type of inflationary pressure or any type of growth pressure where you need to do more with less, I think we can be super helpful in that. And so, if anything, we would probably have more of that mindset is how do we make sure we are helping our customers? And then, of course, we’ll look to share gains.\nJonathan Neilson: Thanks, Mark. Operator, next question, please.\nOperator: [Operator instructions]\nKarl Keirstead, UBS: Okay, thanks. A number of metrics to applaud, but I think the one that stands out to me is the 16 point growth rate lift to Azure from AI. Satya and Amy, I just wanted to ask if you could unpack that a little bit. Of course, you mentioned that you got a bit of a kicker from capacity coming online. But I’m a little bit more interested in where the demand came in above expectations, like what workload type. It’s hard for us to see that on the outside. Was it a surge in ChatGPT inference that landed in Azure? Was it an uptick in enterprise AI adoption? And Amy, do you think that 16 points could be higher in June? Thank you.\nAmy Hood: Thanks, Karl, for the question. Just to provide some clarity, because I think your question implies something that we didn’t mean to imply on the call. First, the real outperformance in Azure this quarter was in our non-AI business. Then to talk about the AI business, really what was better was precisely what we said. We talked about this. We knew Q3 that we had really matched supply and demand pretty carefully, and so didn’t expect to do much better than we had guided to on the AI side. We’ve been quite consistent on that. The only real up side we saw on the AI side of the business was that we were able to deliver supply early to a number of customers. And being able to do that throughout the quarter creates quite a good benefit to us. But the majority of our outperformance versus where we had expected to be was on the non-AI piece of the business.\nJonathan Neilson: Thanks, Karl. Operator, next question, please.\nOperator: [Operator instructions]\nKash Rangan, Goldman Sachs: Hi, thank you very much. One question for Amy. You’ve said in the past that you can attain better and better capital efficiency with the Cloud business, and probably Cloud and AI business. Where do you stand today, Amy? Maybe, Satya, you can opine as well, that you’ve said before that you can slow down your CapEx growth rate, while still accelerate Azure, which includes AI. Can we get a market to market on that? Thank you.\nAmy Hood: Maybe I’ll start, Kash, and let Satya add on, because I really think when you go back and read some of Satya’s comments on how the S-curves build on themselves, that’s actually the levers that go in to the answer of the question that you’re asking. And so, the way, of course, you’ve seen that historically is right when we went through the prior cloud transitions, you see CapEx accelerate. You build out datacenter footprints. You slowly fill CPU capacity. And over time, you see software efficiencies and hardware efficiencies build on themselves. And you saw that process for us, for, goodness, now, quite a long time. And what Satya’s talking about is how quickly that’s happening on the AI side of the business, and you add to that model diversity. Think about the same levers, plus model efficiency, those compound. Now, the one thing that’s a little different this time is just the pace. And so, when you’re seeing that happen, pace in terms of efficiency time, but also pace in terms of the buildout, so it can mask some of the progress. But we are working hard across all of the teams, hardware, software, even the build teams, to get things in place as quickly as possible, dock to live times. All of that is improving, and all of that actually is benefiting us. And I’ll go ahead and say our margins on the AI side of the business are better than they were at this point, by far than when we went through the same transition in the server to cloud transition.\nSatya Nadella: Yeah, I mean, I think at a macro level, I think the way to think about this is, you can ask the question, what’s the difference between a hosting business and a hyperscale business? It’s software. That’s, I think, the gist of it. Yes, for sure, it’s a capital intensive business, but capital efficiency comes from that system wide software optimization. And that’s what makes the hyperscale business attractive, and that’s what we want to just keep executing super well on.\nKash Rangan: Super, Thanks so much.\nJonathan Neilson: Thanks, Kash. Operator, next question, please.\nOperator: [Operator instructions]\nMark Murphy, JPMorgan: Thank you so much. Satya, you had commented recently that the DeepSeek moment is a real thing, and you had said that software efficiencies mean that the fleet will be aged for a longer time. Can you comment on how those advances are affecting the pace and volume of AI experimentation and activity in the marketplace? And Amy, could we start to consider the possibility that software enhancements might extend the useful life assumption that you’re using for GPUs, or is it a little premature to be thinking that way?\nSatya Nadella: Yeah. First of all, I think some of the work that actually, OpenAI first pioneered and did with all of the reasoning models, and of course, DeepSeek has added to it and done good work as well, and others as well, the idea that you can have test time compute plus pre-training, and then some of the great optimization at inference time that has all happened has proven out. I mean, if you look at it, I would say for every Moore’s Law change and movement, there’s probably a 10x improvement because of software. That’s what’s happening with these models. Some of it comes from model architecture. Some of that comes from data efficiency, compute efficiency, and what have you. That’s what we are riding, and we feel that, all up, when you have a commodity that is getting that better, then the question is, how do you build out a fleet that’s super balanced, so that then the workloads can be built and can, in fact, take advantage of that efficiency at the underlying infrastructure? I mean, it’s kind of like virtualization. What is the difference between servers and, again, client server with virtualization? It was efficiency. What is the difference between virtualization and cloud? It was efficiency. What is the difference between this generation of cloud and AI? It’s efficiency. The more you can kind of continue to think about software driving that efficiency is what drives demand, ultimately.\nAmy Hood: And to your specific question, in terms of thinking about the depreciable life of an asset, we like to have a long history before we make any of those changes. We’re focused on getting every bit of useful life we can, of course, out of assets. But, to Satya’s point, that tends to be a software question more than a hardware one.\nMark Murphy: Thank you.\nJonathan Neilson: Thanks, Mark. Operator, next question, please.\nOperator: [Operator instructions]\nKirk Materne, Evercore ISI: Yes, thanks very much, and congrats on a great quarter. Amy, you mentioned that the upside in Azure came from the non-AI services this time around. I was wondering if you could just talk a little bit more about that. And I guess as you look forward, maybe what’s different this go round versus what we saw a few years ago, when, obviously, things like optimization weighed on the growth a little bit? It sounds like the product portfolio is much broader right now, but just wondering if you could add some color on that front. Thank you.\nAmy Hood: Sure, and thanks for the question, Kirk. We know the non-AI. I talked a little bit about this. In general, we saw better than expected performance across our segments, but we saw acceleration in our largest customers. We call that the enterprise segment in general. And then in what we talked about of our scale notions, where we had some challenges in Q2, things were a little better. And we still have some work to do in our scale notions. And we’re encouraged by our progress. We’re excited to stay focused on that as, of course, we work through the final quarter of our fiscal year. By geo, the performance was pretty consistent. Satya actually highlighted some of the workloads that came in a little better than we thought. Obviously, just some good, consistent work on migration, good execution by the sales and partner teams, the data workloads he went through. And so, in general, Kirk, I wouldn’t say it’s anything beyond that. I do think it was improved execution. And I was happy to see it, but there’s still some work to do on our scale motions in particular.\nKirk Materne: Thank you.\nJonathan Neilson: Thanks, Kirk. Operator, we have time for one last question.\nOperator: [Operator instructions]\nAlex Zukin, Wolfe Research: Hey guys, thanks for squeezing me in, and again, just amazing. Congratulations on those Azure numbers, which I think are, quite honestly, just inspiring. Maybe, Amy, to the point that you’re making that the surprise factor was on the non-AI side of the house, and it sounds like there’s confidence in that continuing beyond. How much of that are you starting to see the pull in of the non-AI driven by the AI portion of Azure? And on the AI portion, specifically, as test time compute really just blows out kind of prior conceptions of scaling law challenges, how much does that change, potentially, the curve of the AI Azure growth as you go forward here over the next few quarters?\nAmy Hood: Thanks, Alex. Let me, first of all, say I think we’ve talked about this quite a bit. It’s always a good chance to get to iterate this. It’s getting harder and harder to separate what an AI workload is from a non-AI workload. And we’ve talked about it this way, I think, in most instances, to make sure people understood that when we were accelerating all of our CapEx spend over the past two and a half or three years now, that people had confidence that we were turning that into revenue and product in a way that was transparent and that everyone could understand, really the goals that we had set for ourselves and for our partners and customers in terms of building product that turned to revenue. But if you take a step back from that, it’s that these workloads are being built, GPUs, CPUs, storage, network, all the same things. And so, I think really what we’re talking about is really how Satya talked about, in one of the earlier questions, we’re seeing digital natives. Digital natives build workloads. They do AI work. They do non-AI work. Do they tend to do that work in the same cloud? Lots of times. Sometimes it’s all in the same place, not all the time. But that relationship gets stronger and stronger as people pivot to more of AI heavy workloads. And so, I think you’re starting to see some of that relationship. I think we’ll continue to see that as AI workloads continue to get built and experimented with, and proof of concepts get expanded. And so, I think I mostly focus on the fact that together, we saw good performance in Q3 on Azure, Azure inclusive of both components, in terms of our execution, in terms of the field and partner teams, and backlog and conversion, and interesting workloads, and adding customer value, and solving real problems, and adding real value. And I think that’s probably, Alex, how I would approach that number, more than trying to separate it in the way that even we have talked about it, but for very different reasons.\nJonathan Neilson: Thanks, Alex. That wraps up the Q&A portion of today’s earnings call. Thank you for joining us today, and we look forward to speaking with you all soon.\nSatya Nadella: Thank you.\nAmy Hood: Thank you.\nOperator: This concludes today's conference. You may disconnect your lines at this time, and enjoy the rest of your day.",
+            "transcript_split": "split transcript is available for premium subscribers only."
+        }
+    ]
+
+    print("Splitting records into chunks...")
+    all_splits = rag_manager.split_transcript(full_transcript)
+    print(f"Produced {len(all_splits)} chunks.")
+
+    for i, split in enumerate(all_splits):
+        print(f"Chunk {i}: {split}\n\n")
+
+    print("Adding chunks to vectorstore...")
+    rag_manager.add_texts(
+        all_splits,
+        transcript_id=123,
+        base_metadata={
+            "ticker_symbol": "MSFT",
+            "call_date": "2025-04-30",
+        },
+    )
+    print("Chunks added to vectorstore.")
+
+    print("Testing similarity search...")
+    query = (
+        "As context, you are provided with chunks or all of an earnings call transcript. "
+        'Based on the transcript, try to return a structured output with these keys: '
+        '"summary" (string, 3-5 sentences providing a brief overview of the key points), '
+        '"concise_rationale" (string, 1-2 sentences explaining the key reasons for your conclusions), '
+        '"overall_sentiment" (' 
+        ' \"Positive\" if the outlook of the company is optimistic from an investor point of view,'
+        ' \"Neutral\" if the outlook of the company is neither optimistic nor pessimistic from an investor point of view, or '
+        ' \"Negative\" if the outlook of the company is pessimistic from an investor point of view'
+        '), '
+        '"management_confidence_score" (integer 0-100, providing a measure of how confident management is in their guidance, '
+        '0 meaning not confident at all and 100 meaning very confident), '
+        '"evasiveness_score_q_a" (integer 0-100, assessing how evasive management was during Q&A,'
+        '0 meaning not evasive at all and 100 meaning very evasive), '
+        '"key_topics" (array of 3-5 strings, highlighting the main topics discussed), '
+        '"red_flags" (array of 3-5 strings, noting any potential concerns raised). '
+        "Do NOT include any extraneous text or internal reasoning. Ensure the structured output is well-formed."
+    )
+    retrieved_docs = rag_manager.vector_store.similarity_search(query, k=5)
+    print(f"Retrieved {len(retrieved_docs)} documents.")
+
+    print("Retrieved Documents:")
+    for doc in retrieved_docs:
+        print(f" - {doc}")
+    print("\n--- End of RAG Manager Test ---\n")
+
+    print("Requesting Analysis...")
+    print("Building Context Text...")
+    test_transcript = rag_manager.build_context_text(retrieved_docs)
+    print(f"Context Text Length: {len(test_transcript)} characters")
+    # --- Testing with ChatGPTService ---
+    
+    if rag_manager.chatgpt_service is None:
+        print("Skipping ChatGPTService tests because OPENAI_API_KEY is not set.")
+        analysis_result = None
+    else:
+        print(f"--- Testing ChatGPTService with {rag_manager.chatgpt_service.model_name} ---")
+    
+        try:
+            analysis_result = rag_manager.chatgpt_service.analyze_transcript(
+                transcript_text=test_transcript,
+                temperature=1.0,
+                max_completion_tokens=1000,
+            )
+        except Exception as exc:
+            print("analyze_transcript raised an exception:", exc)
+            analysis_result = None
+    
+        print("analyze_transcript returned (or failed) -> continue to result handling")
+    
+    if analysis_result is None:
+        print("No analysis_result object (call failed).")
+    else:
+        try:
+            print(
+                f"\n--- ChatGPT Analysis {analysis_result.model} executed in {analysis_result.request_time_ms:.2f} ms ---"
+                f"\nSummary: {analysis_result.structured_output.summary}"
+                f"\nRationale: {analysis_result.structured_output.concise_rationale}"
+                f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
+                f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
+                f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
+                f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
+                f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
+                f"\nTemperature: {analysis_result.temperature}"
+                f"\nMax Tokens: {analysis_result.max_tokens}"
+                f"\nTotal Tokens: {analysis_result.total_tokens}"
+                f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
+                f"\nCompletion Tokens: {analysis_result.completion_tokens}"
+            )
+            print("\n--- Full Analysis Result ---")
+            print(analysis_result)
+        except Exception as exc:
+            print("Failed to print analysis result:", exc)
+            print("Failed to print analysis result:", exc)
+
+    # --- Testing with GeminiService ---
+
+    # if not GEMINI_API_KEY:
+    #     print("Error: GEMINI_API_KEY environment variable not set for testing.")
+    # else:
+    #     gemini_analyzer = GeminiService(api_key=GEMINI_API_KEY, model_name="gemini-2.5-pro")
+    #     print(f"--- Testing GeminiService with {gemini_analyzer.model_name} ---")
+
+    #     try:
+    #         analysis_result = gemini_analyzer.analyze_transcript(
+    #             transcript_text=test_transcript,
+    #         )
+    #     except Exception as exc:
+    #         print("analyze_transcript raised an exception:", exc)
+    #         analysis_result = None
+
+    #     print("analyze_transcript returned (or failed) -> continue to result handling")
+
+    #     if analysis_result is None:
+    #         print("No analysis_result object (call failed).")
+    #     else:
+    #         try:
+    #             print(
+    #                 f"\n--- Gemini Analysis {analysis_result.model} executed in {analysis_result.request_time_ms:.2f} ms ---"
+    #                 f"\nSummary: {analysis_result.structured_output.summary}"
+    #                 f"\nRationale: {analysis_result.structured_output.concise_rationale}"
+    #                 f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
+    #                 f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
+    #                 f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
+    #                 f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
+    #                 f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
+    #                 f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
+    #                 f"\nThoughts Tokens: {analysis_result.thoughts_tokens}"
+    #                 f"\nCandidates Tokens: {analysis_result.candidates_tokens}"
+    #             )
+    #             print("\n--- Full Analysis Result ---")
+    #             print(analysis_result)
+    #         except Exception as exc:
+    #             print("Failed to print analysis result:", exc)
+
+    # --- Testing with GroqService ---
+
+    # analysis_result = None
+
+    # if not GROQ_API_KEY:
+    #     print("Error: GROQ_API_KEY environment variable not set for testing.")
+    # else:
+    #     groq_analyzer = GroqService(api_key=GROQ_API_KEY, model_name="openai/gpt-oss-120b")
+    #     print(f"--- Testing GroqService with {groq_analyzer.model_name} ---")
+
+    #     try:
+    #         analysis_result = groq_analyzer.analyze_transcript(
+    #             transcript_text=test_transcript,
+    #         )
+    #     except Exception as exc:
+    #         print("analyze_transcript raised an exception:", exc)
+    #         analysis_result = None
+
+    #     print("analyze_transcript returned (or failed) -> continue to result handling")
+
+    #     if analysis_result is None:
+    #         print("No analysis_result object (call failed).")
+    #     else:
+    #         try:
+    #             print(
+    #                 f"\n--- ChatGPT Analysis {analysis_result.model} executed in {analysis_result.request_time_ms:.2f} ms ---"
+    #                 f"\nSummary: {analysis_result.structured_output.summary}"
+    #                 f"\nRationale: {analysis_result.structured_output.concise_rationale}"
+    #                 f"\nSentiment: {analysis_result.structured_output.overall_sentiment}"
+    #                 f"\nConfidence: {analysis_result.structured_output.key_metrics.management_confidence_score}"
+    #                 f"\nEvasiveness: {analysis_result.structured_output.key_metrics.evasiveness_score_q_a}"
+    #                 f"\nKey Topics: {', '.join(analysis_result.structured_output.key_topics)}"
+    #                 f"\nRed Flags: {', '.join(analysis_result.structured_output.red_flags)}"
+    #                 f"\nTotal Tokens: {analysis_result.total_tokens}"
+    #                 f"\nPrompt Tokens: {analysis_result.prompt_tokens}"
+    #                 f"\nCompletion Tokens: {analysis_result.completion_tokens}"
+    #             )
+    #             print("\n--- Full Analysis Result ---")
+    #             print(analysis_result)
+    #         except Exception as exc:
+    #             print("Failed to print analysis result:", exc)
+
+
+
+# # Retrieval & Generation
+# from langchain_core.documents import Document
+# from typing_extensions import List
+
+
+# class State(BaseModel):
+#     question: str
+#     context: List[Document]
+#     answer: str
+
+# def retrieve(state: State):
+#     retrieved_docs = vector_store.similarity_search(state.question)
+#     return retrieved_docs
+
+# def generate(state: State):
+#     docs_content = "\n\n".join(doc.page_content for doc in state.context)
+    
+#     system_instructions = (
+#             "You are a financial analyst AI specializing in dissecting earnings call transcripts. "
+#             "When analyzing, internally reason step-by-step to improve accuracy (chain-of-thought). "
+#             "DO NOT reveal detailed internal chain-of-thought or step-by-step working in the output. "
+#             "Include a very short 1-2 sentence 'concise_rationale' explaining the key reasons for your conclusions."
+#         )
+
+#     messages = [
+#         {"role": "system", "content": system_instructions},
+#         {"role": "user", "content": f"Context:\n{docs_content}\n\nQuestion: {state.question}"}
+#     ]
+    
+#     response = llm.invoke(messages)
+#     return {"answer": getattr(response, "content", str(response))}
+
+
+# # Compile
+# from langgraph.graph import START, StateGraph
+
+# graph_builder = StateGraph(State).add_sequence([retrieve, generate])
+# graph_builder.add_edge(START, "retrieve")
+# graph = graph_builder.compile()
+
+
+
+
+    # print("Trying retrieval 1...")
+    # try1 = State(question="What guidance was given for revenue?", context=[], answer="")
+    # retrieved_docs = retrieve(try1)
+    # print(f"Retrieved {len(retrieved_docs)} documents.")
+
+    # print("Setting up prompt 1...")
+    # try1.context = retrieved_docs
+    # response = generate(try1)
+    # try1.answer = response["answer"]
+    # print(f"Answer 1: {try1.answer}")
+
+    # print("Trying retrieval 2...")
+    # try2 = State(question="Summarize Microsoft's cloud revenue and growth drivers mentioned on the call.", context=[], answer="")
+    # retrieved_docs = retrieve(try2)
+    # print(f"Retrieved {len(retrieved_docs)} documents.")
+
+    # print("Setting up prompt 2...")
+    # try2.context = retrieved_docs
+    # response = generate(try2)
+    # try2.answer = response["answer"]
+    # print(f"Answer 2: {try2.answer}")
+
+    # print("Trying retrieval 3...")
+    # try3 = State(question="Any red flags or caution from management?", context=[], answer="")
+    # retrieved_docs = retrieve(try3)
+    # print(f"Retrieved {len(retrieved_docs)} documents.")
+
+    # print("Setting up prompt 3...")
+    # try3.context = retrieved_docs
+    # response = generate(try3)
+    # try3.answer = response["answer"]
+    # print(f"Answer 3: {try3.answer}")
+
+
+
+    # from langchain import hub
+
+    # context = retrieve_docs({"question": "What guidance was given for revenue?"})
+
+    # # N.B. for non-US LangSmith endpoints, you may need to specify
+    # # api_url="https://api.smith.langchain.com" in hub.pull.
+    # prompt = hub.pull("rlm/rag-prompt")
+
+    # example_messages = prompt.invoke(
+    #     {"context": context, "question": "What guidance was given for revenue?"}
+    # ).to_messages()
+
+    # assert len(example_messages) == 1
+    # print(example_messages[0].content)
