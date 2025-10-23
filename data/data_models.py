@@ -13,68 +13,50 @@ db = SQLAlchemy()
 def get_current_datetime():
     return datetime.now()
 
-class User(db.Model, UserMixin):
+class User(UserMixin, db.Model):
     """Contains all instances of users"""
     __tablename__ = "users"
+    
     user_id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(150), unique=True, nullable=False)
-    email = db.Column(db.String(255), unique=True, nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    is_active_db = db.Column('is_active', db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=get_current_datetime)
-    updated_at = db.Column(db.DateTime, default=get_current_datetime, onupdate=get_current_datetime)
-    last_login_at = db.Column(db.DateTime, nullable=True)
+    active = db.Column('is_active', db.Boolean, default=True, nullable=False)  # persist as 'is_active' but avoid overriding UserMixin property
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    analysis_reports = db.relationship('AnalysisReport', back_populates='user', lazy='dynamic')
+    transcripts = db.relationship('EarningsCallTranscript', back_populates='user', lazy='dynamic')
 
-    # Relationships: user owns transcripts and analysis reports
-    transcripts = db.relationship("EarningsCallTranscript", back_populates="user", lazy=True, cascade="all, delete-orphan")
-    analysis_reports = db.relationship("AnalysisReport", back_populates="user", lazy=True, cascade="all, delete-orphan")
+    def __repr__(self):
+        return f"<User {self.username}"
+
+    def get_id(self):
+        return str(self.user_id)
+
+    def set_password(self, password):
+        """Hash and set the user's password."""
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        """Check if the provided password matches the hashed password."""
+        return check_password_hash(self.password_hash, password)
 
     @property
     def is_active(self) -> bool:
-        """Proxy property for Flask-Login; reads the underlying DB column."""
-        return bool(self.is_active_db)
+        """Flask-Login compatibility property backed by the 'active' column."""
+        return bool(self.active)
 
     @is_active.setter
-    def is_active(self, value: bool):
-        self.is_active_db = bool(value)
+    def is_active(self, value: bool) -> None:
+        self.active = bool(value)
 
-    def set_password(self, password: str):
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password: str) -> bool:
-        return check_password_hash(self.password_hash, password)
-
-    def get_id(self) -> str:
-        """
-        Flask-Login expects get_id() to return a unicode ID uniquely identifying
-        this user. Return the primary key as a string.
-        """
-        return str(self.user_id)
-
-    def __repr__(self):
-        return f"<User {self.username} ({self.user_id})>"
-
-    @validates("username")
-    def validate_username(self, username: str) -> str:
-        """Normalize username (trim) and update timestamp."""
-        if username is None:
-            raise ValueError("username cannot be empty")
-        v = username.strip()
-        if not v:
-            raise ValueError("username cannot be empty after trimming")
-        self.updated_at = get_current_datetime()
-        return v
-
-    @validates("email")
-    def validate_email(self, email: str) -> str:
-        """Normalize email (trim) and validate basic format."""
-        if email is None:
-            raise ValueError("email cannot be empty")
-        v = email.strip()
-        if not re.match(r"^[^@]+@[^@]+\.[^@]+$", v):
-            raise ValueError("Invalid email address")
-        self.updated_at = get_current_datetime()
-        return v
+    @staticmethod
+    def validate_username_format(username: str) -> bool:
+        """Validate username: 2+ chars, letters/numbers/_/- only."""
+        if not isinstance(username, str):
+            return False
+        return bool(re.fullmatch(r'[A-Za-z0-9_-]{2,}', username))
 
 class Company(db.Model):
     """Stores static metadata about companies whose earnings calls will be analyzed."""
