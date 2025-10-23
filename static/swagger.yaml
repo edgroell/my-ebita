@@ -1,0 +1,560 @@
+openapi: 3.0.0
+info:
+  title: My EBITA API
+  description: |
+    **My EBITA** - Earnings Beat Indicator & Text Analyzer
+    
+    An AI Financial Sidekick that provides comprehensive earnings call analysis using multiple AI models.
+    
+    ## Features
+    - Multi-user support with authentication
+    - Earnings transcript acquisition and storage
+    - Triple AI analysis (ChatGPT, Gemini, Groq)
+    - RAG-powered conversational chatbot
+    - Conversation history download
+    
+    ## Authentication
+    Most endpoints require authentication. Use the `/login` endpoint to obtain a session cookie.
+  version: 1.0.0
+  contact:
+    name: Ed Groell
+    email: email@edgroell.com
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+
+tags:
+  - name: Authentication
+    description: User authentication and account management
+  - name: Transcripts
+    description: Earnings call transcript operations
+  - name: Analysis
+    description: AI analysis operations
+  - name: Chatbot
+    description: Conversational AI chatbot
+  - name: User
+    description: User profile and settings
+
+paths:
+  /login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: johndoe
+                password:
+                  type: string
+                  format: password
+                  example: securepassword123
+                remember_me:
+                  type: boolean
+                  default: false
+                  description: Keep user logged in for 30 days
+      responses:
+        '302':
+          description: Successful login, redirects to dashboard
+        '200':
+          description: Login page rendered (GET request)
+
+  /logout:
+    get:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Logout user and clean up active sessions
+      security:
+        - cookieAuth: []
+      responses:
+        '302':
+          description: Successful logout, redirects to home
+
+  /register:
+    post:
+      tags:
+        - Authentication
+      summary: Register new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                  example: johndoe
+                email:
+                  type: string
+                  format: email
+                  example: john@example.com
+                password:
+                  type: string
+                  format: password
+                  minLength: 6
+                  example: securepassword123
+      responses:
+        '302':
+          description: Registration successful, redirects to dashboard
+
+  /api/v1/transcripts/fetch:
+    post:
+      tags:
+        - Transcripts
+      summary: Fetch earnings call transcript
+      description: Fetch transcript from API Ninjas for specified company and quarter
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - ticker
+                - year
+                - quarter
+              properties:
+                ticker:
+                  type: string
+                  example: AAPL
+                  description: Stock ticker symbol
+                year:
+                  type: integer
+                  example: 2024
+                  description: Fiscal year
+                quarter:
+                  type: integer
+                  minimum: 1
+                  maximum: 4
+                  example: 3
+                  description: Fiscal quarter (1-4)
+      responses:
+        '200':
+          description: Transcript fetched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  transcript_id:
+                    type: integer
+        '400':
+          description: Invalid request parameters
+        '404':
+          description: Transcript not found
+        '429':
+          description: Rate limit exceeded
+
+  /api/v1/transcripts/{transcript_id}:
+    get:
+      tags:
+        - Transcripts
+      summary: Get transcript by ID
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: transcript_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Transcript details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transcript'
+        '404':
+          description: Transcript not found
+
+    delete:
+      tags:
+        - Transcripts
+      summary: Delete transcript
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: transcript_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Transcript deleted successfully
+        '404':
+          description: Transcript not found
+
+  /api/v1/analysis/run:
+    post:
+      tags:
+        - Analysis
+      summary: Run AI analysis on transcript
+      description: Analyze transcript using ChatGPT, Gemini, and Groq
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transcript_id
+              properties:
+                transcript_id:
+                  type: integer
+                  example: 123
+      responses:
+        '200':
+          description: Analysis completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  report_id:
+                    type: integer
+                  redirect_url:
+                    type: string
+        '400':
+          description: Invalid request
+        '404':
+          description: Transcript not found
+        '429':
+          description: Rate limit exceeded
+
+  /api/v1/reports/{report_id}:
+    get:
+      tags:
+        - Analysis
+      summary: Get analysis report
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Analysis report HTML page
+        '404':
+          description: Report not found
+
+    delete:
+      tags:
+        - Analysis
+      summary: Delete analysis report
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Report deleted successfully
+        '404':
+          description: Report not found
+
+  /api/v1/reports/{report_id}/download:
+    get:
+      tags:
+        - Analysis
+      summary: Download report as JSON
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Report JSON file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisReport'
+
+  /api/v1/chat:
+    post:
+      tags:
+        - Chatbot
+      summary: Send message to chatbot
+      description: Chat with AI assistant about the earnings call transcript
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transcript_id
+                - message
+              properties:
+                transcript_id:
+                  type: integer
+                  example: 123
+                message:
+                  type: string
+                  example: What were the main revenue drivers?
+      responses:
+        '200':
+          description: Bot response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  transcript_id:
+                    type: integer
+        '400':
+          description: Invalid request
+        '429':
+          description: Rate limit exceeded (20 per minute)
+
+  /api/v1/chat/history/{transcript_id}:
+    get:
+      tags:
+        - Chatbot
+      summary: Download conversation history
+      description: Download full conversation history as JSON file
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: transcript_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Conversation history JSON file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationHistory'
+
+  /api/v1/chat/clear/{transcript_id}:
+    post:
+      tags:
+        - Chatbot
+      summary: Clear conversation history
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: transcript_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: History cleared successfully
+        '429':
+          description: Rate limit exceeded (10 per hour)
+
+  /api/v1/chat/close/{transcript_id}:
+    post:
+      tags:
+        - Chatbot
+      summary: Close chat session
+      description: Clean up and close the active chat session
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: transcript_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Session closed successfully
+        '403':
+          description: Unauthorized - not your session
+
+  /api/v1/user/profile:
+    get:
+      tags:
+        - User
+      summary: Get user profile
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: User profile page
+
+  /api/v1/user/stats:
+    get:
+      tags:
+        - User
+      summary: Get user statistics
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: User statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_transcripts:
+                    type: integer
+                  total_reports:
+                    type: integer
+                  recent_activity:
+                    type: array
+                    items:
+                      type: object
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Session cookie obtained via /login
+
+  schemas:
+    Transcript:
+      type: object
+      properties:
+        transcript_id:
+          type: integer
+        ticker_symbol:
+          type: string
+        fiscal_year:
+          type: integer
+        fiscal_quarter:
+          type: integer
+        call_date:
+          type: string
+          format: date
+        transcript_raw:
+          type: string
+        company:
+          type: object
+          properties:
+            company_name:
+              type: string
+            logo_url:
+              type: string
+
+    AnalysisReport:
+      type: object
+      properties:
+        report_id:
+          type: integer
+        transcript_id:
+          type: integer
+        analysis_date:
+          type: string
+          format: date-time
+        gemini_summary:
+          type: string
+        chatgpt_summary:
+          type: string
+        groq_summary:
+          type: string
+        gemini_overall_sentiment:
+          type: string
+          enum: [Positive, Neutral, Negative]
+        chatgpt_overall_sentiment:
+          type: string
+          enum: [Positive, Neutral, Negative]
+        groq_overall_sentiment:
+          type: string
+          enum: [Positive, Neutral, Negative]
+        gemini_red_flags_identified:
+          type: array
+          items:
+            type: string
+        chatgpt_red_flags_identified:
+          type: array
+          items:
+            type: string
+        groq_red_flags_identified:
+          type: array
+          items:
+            type: string
+
+    ConversationHistory:
+      type: object
+      properties:
+        transcript_id:
+          type: integer
+        company:
+          type: object
+          properties:
+            name:
+              type: string
+            ticker:
+              type: string
+        fiscal_info:
+          type: object
+          properties:
+            year:
+              type: integer
+            quarter:
+              type: integer
+            call_date:
+              type: string
+              format: date
+        conversation:
+          type: object
+          properties:
+            total_turns:
+              type: integer
+            export_date:
+              type: string
+              format: date-time
+            user_id:
+              type: integer
+            username:
+              type: string
+            turns:
+              type: array
+              items:
+                type: object
+                properties:
+                  question:
+                    type: string
+                  answer:
+                    type: string
