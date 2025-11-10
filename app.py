@@ -2,7 +2,7 @@
 My EBITA* - An AI Financial Sidekick
 *EBITA: Earnings Beat Indicator & Text Analyzer
 by Ed Groell
-Latest: 22-OCT-2025
+Latest: 10-NOV-2025
 """
 
 import os
@@ -27,7 +27,7 @@ from data.data_manager import DataManager
 # Import AI components
 from services_ai.rag_manager import RAGManager
 from services_ai.vector_store import ChromaVectorStore
-from services_ai.agentic_bot import AgenticBot  # This is correct
+from services_ai.agentic_bot import AgenticBot
 
 # Import API services
 from services_api.ninjas_service import NinjasService
@@ -53,7 +53,7 @@ app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-ch
 basedir = os.path.abspath(os.path.dirname(__file__))
 
 # Session configuration for auto-logout
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)  # Auto-logout after 2 hours of inactivity
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)  # Auto-logout after 1 hour of inactivity
 app.config['SESSION_COOKIE_SECURE'] = not app.debug  # HTTPS only in production
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
@@ -279,7 +279,7 @@ def login():
         data = _read_body()
         username = (data.get('username') or data.get('username_or_email') or '').strip()
         password = (data.get('password') or '').strip()
-        remember_me = data.get('remember_me', False)  # Add checkbox to login form
+        remember_me = data.get('remember_me', False)
 
         app.logger.info(f"Login attempt for username: {username}")
 
@@ -522,9 +522,9 @@ def acquire_transcript():
         
         app.logger.info(f"Transcript saved: {ticker} Q{quarter} {year} (ID: {new_transcript.transcript_id})")
         
-        # Step 3: Auto-index to RAG using the ORIGINAL sync method
+        # Step 3: Auto-index to RAG
         if rag_manager:
-            indexed = _index_transcript_to_rag(new_transcript)  # Use original sync function
+            indexed = _index_transcript_to_rag(new_transcript)
             if indexed:
                 app.logger.info(f"Transcript indexed to RAG: {new_transcript.transcript_id}")
                 flash(f"✓ Transcript acquired and indexed! (ID: {new_transcript.transcript_id})", 'success')
@@ -736,10 +736,28 @@ def request_analysis():
     
     app.logger.info(f"All parallel analyses complete for transcript {transcript_id}")
     
-    # Save to database (rest of the code remains the same)
+    # Helper function to extract nested fields
     def get_field(service_results, field, default: Any = ""):
-        if service_results and service_results.get('success') and 'data' in service_results:
-            return service_results['data'].get(field, default)
+        """Extract field from service results, checking both flat and nested structures"""
+        if not service_results or not service_results.get('success') or 'data' not in service_results:
+            return default
+        
+        data = service_results['data']
+        
+        # Try direct field access first
+        if field in data:
+            return data[field]
+        
+        # Try nested in key_metrics
+        if 'key_metrics' in data and field in data['key_metrics']:
+            return data['key_metrics'][field]
+        
+        # Special handling for score fields
+        if field in ['management_confidence_score', 'evasiveness_score_q_a']:
+            # Check key_metrics first
+            if 'key_metrics' in data:
+                return data['key_metrics'].get(field, default)
+        
         return default
     
     report_data = {        
@@ -747,8 +765,8 @@ def request_analysis():
         'chatgpt_summary': get_field(results.get('chatgpt'), 'summary'),
         'chatgpt_concise_rationale': get_field(results.get('chatgpt'), 'concise_rationale'),
         'chatgpt_overall_sentiment': get_field(results.get('chatgpt'), 'overall_sentiment', 'Neutral'),
-        'chatgpt_management_confidence_score': get_field(results.get('chatgpt'), 'management_confidence_score', 0),
-        'chatgpt_evasiveness_score_q_a': get_field(results.get('chatgpt'), 'evasiveness_score_q_a', 0),
+        'chatgpt_management_confidence_score': float(get_field(results.get('chatgpt'), 'management_confidence_score', 0.0)),
+        'chatgpt_evasiveness_score_q_a': float(get_field(results.get('chatgpt'), 'evasiveness_score_q_a', 0.0)),
         'chatgpt_key_topics_discussed': get_field(results.get('chatgpt'), 'key_topics', []),
         'chatgpt_red_flags_identified': get_field(results.get('chatgpt'), 'red_flags', []),
         'chatgpt_raw_response_json': results.get('chatgpt', {}),
@@ -758,8 +776,8 @@ def request_analysis():
         'gemini_summary': get_field(results.get('gemini'), 'summary'),
         'gemini_concise_rationale': get_field(results.get('gemini'), 'concise_rationale'),
         'gemini_overall_sentiment': get_field(results.get('gemini'), 'overall_sentiment', 'Neutral'),
-        'gemini_management_confidence_score': get_field(results.get('gemini'), 'management_confidence_score', 0),
-        'gemini_evasiveness_score_q_a': get_field(results.get('gemini'), 'evasiveness_score_q_a', 0),
+        'gemini_management_confidence_score': float(get_field(results.get('gemini'), 'management_confidence_score', 0.0)),
+        'gemini_evasiveness_score_q_a': float(get_field(results.get('gemini'), 'evasiveness_score_q_a', 0.0)),
         'gemini_key_topics_discussed': get_field(results.get('gemini'), 'key_topics', []),
         'gemini_red_flags_identified': get_field(results.get('gemini'), 'red_flags', []),
         'gemini_raw_response_json': results.get('gemini', {}),
@@ -769,13 +787,18 @@ def request_analysis():
         'groq_summary': get_field(results.get('groq'), 'summary'),
         'groq_concise_rationale': get_field(results.get('groq'), 'concise_rationale'),
         'groq_overall_sentiment': get_field(results.get('groq'), 'overall_sentiment', 'Neutral'),
-        'groq_management_confidence_score': get_field(results.get('groq'), 'management_confidence_score', 0),
-        'groq_evasiveness_score_q_a': get_field(results.get('groq'), 'evasiveness_score_q_a', 0),
+        'groq_management_confidence_score': float(get_field(results.get('groq'), 'management_confidence_score', 0.0)),
+        'groq_evasiveness_score_q_a': float(get_field(results.get('groq'), 'evasiveness_score_q_a', 0.0)),
         'groq_key_topics_discussed': get_field(results.get('groq'), 'key_topics', []),
         'groq_red_flags_identified': get_field(results.get('groq'), 'red_flags', []),
         'groq_raw_response_json': results.get('groq', {}),
         'groq_request_ms': results.get('groq', {}).get('metrics', {}).get('request_time_ms') if results.get('groq') else None,
     }
+    
+    # Debug logging
+    app.logger.info(f"[DEBUG] ChatGPT confidence: {report_data['chatgpt_management_confidence_score']}")
+    app.logger.info(f"[DEBUG] Gemini confidence: {report_data['gemini_management_confidence_score']}")
+    app.logger.info(f"[DEBUG] Groq confidence: {report_data['groq_management_confidence_score']}")
     
     new_report = data_manager.create_analysis_report(
         user_id=current_user.user_id,
@@ -1145,8 +1168,6 @@ def cleanup_inactive_bots():
                 bots_to_remove = []
                 
                 for transcript_id, bot in active_bots.items():
-                    # You'd need to add a last_activity timestamp to AgenticBot
-                    # For now, just log the count
                     pass
                 
                 app.logger.info(f"Bot cleanup task: {len(active_bots)} active sessions")

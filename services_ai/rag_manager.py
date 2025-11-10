@@ -104,7 +104,7 @@ class RAGManager:
     def add_texts(
         self,
         texts: List[str],
-        transcript_id: int,  # REQUIRED now
+        transcript_id: int,
         base_metadata: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         """

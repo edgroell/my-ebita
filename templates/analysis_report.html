@@ -122,21 +122,8 @@
             </div>
         </div>
 
-        <!-- Analysis service headings: now 3 columns (Gemini / ChatGPT / Groq) -->
+        <!-- Analysis service headings: now ChatGPT / Gemini / Groq -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-6">
-            <div>
-                <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3 text-gray-700" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-6h-2v6zm0-8h2V7h-2v2z"/>
-                        </svg>
-                        <h3 class="font-bold text-lg text-gray-900">Gemini Analysis</h3>
-                    </div>
-                    <a href="{{ url_for('view_raw_analysis_json', report_id=report.report_id, ai_name='gemini') }}" target="_blank"
-                       class="text-xs text-indigo-600 hover:text-indigo-800 transition duration-150">View Raw JSON</a>
-                </div>
-            </div>
-
             <div>
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center">
@@ -156,6 +143,19 @@
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3 text-gray-700" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-6h-2v6zm0-8h2V7h-2v2z"/>
                         </svg>
+                        <h3 class="font-bold text-lg text-gray-900">Gemini Analysis</h3>
+                    </div>
+                    <a href="{{ url_for('view_raw_analysis_json', report_id=report.report_id, ai_name='gemini') }}" target="_blank"
+                       class="text-xs text-indigo-600 hover:text-indigo-800 transition duration-150">View Raw JSON</a>
+                </div>
+            </div>
+
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3 text-gray-700" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h2v-6h-2v6zm0-8h2V7h-2v2z"/>
+                        </svg>
                         <h3 class="font-bold text-lg text-gray-900">Groq Analysis</h3>
                     </div>
                     <a href="{{ url_for('view_raw_analysis_json', report_id=report.report_id, ai_name='groq') }}" target="_blank"
@@ -165,15 +165,15 @@
         </div>
 
         <div class="space-y-6 text-sm">
-            <!-- Summary row: 3 columns -->
+            <!-- Summary row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Summary</p>
-                    <p class="text-gray-700">{{ report.gemini_summary | default("No summary provided.") }}</p>
+                    <p class="text-gray-700">{{ report.chatgpt_summary | default("No summary provided.") }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Summary</p>
-                    <p class="text-gray-700">{{ report.chatgpt_summary | default("No summary provided.") }}</p>
+                    <p class="text-gray-700">{{ report.gemini_summary | default("No summary provided.") }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Summary</p>
@@ -181,15 +181,15 @@
                 </div>
             </div>
 
-            <!-- Concise rationale row: 3 columns -->
+            <!-- Concise rationale row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Concise Rationale</p>
-                    <p class="text-gray-700">{{ report.gemini_concise_rationale | default("No rationale provided.") }}</p>
+                    <p class="text-gray-700">{{ report.chatgpt_concise_rationale | default("No rationale provided.") }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Concise Rationale</p>
-                    <p class="text-gray-700">{{ report.chatgpt_concise_rationale | default("No rationale provided.") }}</p>
+                    <p class="text-gray-700">{{ report.gemini_concise_rationale | default("No rationale provided.") }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Concise Rationale</p>
@@ -197,21 +197,21 @@
                 </div>
             </div>
 
-            <!-- Sentiment row: 3 columns -->
+            <!-- Sentiment row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Sentiment</p>
                     <p class="text-gray-600">
-                        <span class="font-semibold {{ 'text-green-600' if report.gemini_overall_sentiment == 'Positive' else ('text-red-600' if report.gemini_overall_sentiment == 'Negative' else 'text-gray-600') }}">
-                            {{ report.gemini_overall_sentiment | default("N/A") }}
+                        <span class="font-semibold {{ 'text-green-600' if report.chatgpt_overall_sentiment == 'Positive' else ('text-red-600' if report.chatgpt_overall_sentiment == 'Negative' else 'text-gray-600') }}">
+                            {{ report.chatgpt_overall_sentiment | default("N/A") }}
                         </span>
                     </p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Sentiment</p>
                     <p class="text-gray-600">
-                        <span class="font-semibold {{ 'text-green-600' if report.chatgpt_overall_sentiment == 'Positive' else ('text-red-600' if report.chatgpt_overall_sentiment == 'Negative' else 'text-gray-600') }}">
-                            {{ report.chatgpt_overall_sentiment | default("N/A") }}
+                        <span class="font-semibold {{ 'text-green-600' if report.gemini_overall_sentiment == 'Positive' else ('text-red-600' if report.gemini_overall_sentiment == 'Negative' else 'text-gray-600') }}">
+                            {{ report.gemini_overall_sentiment | default("N/A") }}
                         </span>
                     </p>
                 </div>
@@ -225,15 +225,15 @@
                 </div>
             </div>
 
-            <!-- Confidence row: 3 columns -->
+            <!-- Confidence row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Confidence</p>
-                    <p class="text-gray-600">{{ report.gemini_management_confidence_score | default('N/A') }}</p>
+                    <p class="text-gray-600">{{ report.chatgpt_management_confidence_score | default('N/A') }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Confidence</p>
-                    <p class="text-gray-600">{{ report.chatgpt_management_confidence_score | default('N/A') }}</p>
+                    <p class="text-gray-600">{{ report.gemini_management_confidence_score | default('N/A') }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Confidence</p>
@@ -241,15 +241,15 @@
                 </div>
             </div>
 
-            <!-- Evasiveness row: 3 columns -->
+            <!-- Evasiveness row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Evasiveness</p>
-                    <p class="text-gray-600">{{ report.gemini_evasiveness_score_q_a | default('N/A') }}</p>
+                    <p class="text-gray-600">{{ report.chatgpt_evasiveness_score_q_a | default('N/A') }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Evasiveness</p>
-                    <p class="text-gray-600">{{ report.chatgpt_evasiveness_score_q_a | default('N/A') }}</p>
+                    <p class="text-gray-600">{{ report.gemini_evasiveness_score_q_a | default('N/A') }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Evasiveness</p>
@@ -257,15 +257,15 @@
                 </div>
             </div>
 
-            <!-- Key Topics row: 3 columns -->
+            <!-- Key Topics row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Key Topics</p>
-                    <p class="text-gray-600">{{ (report.gemini_key_topics_discussed or []) | join(', ') or 'N/A' }}</p>
+                    <p class="text-gray-600">{{ (report.chatgpt_key_topics_discussed or []) | join(', ') or 'N/A' }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Key Topics</p>
-                    <p class="text-gray-600">{{ (report.chatgpt_key_topics_discussed or []) | join(', ') or 'N/A' }}</p>
+                    <p class="text-gray-600">{{ (report.gemini_key_topics_discussed or []) | join(', ') or 'N/A' }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Key Topics</p>
@@ -273,15 +273,15 @@
                 </div>
             </div>
 
-            <!-- Red Flags row: 3 columns -->
+            <!-- Red Flags row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2 text-red-500">Red Flags</p>
-                    <p class="text-red-500">{{ (report.gemini_red_flags_identified or []) | join(', ') or 'N/A' }}</p>
+                    <p class="text-red-500">{{ (report.chatgpt_red_flags_identified or []) | join(', ') or 'N/A' }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2 text-red-500">Red Flags</p>
-                    <p class="text-red-500">{{ (report.chatgpt_red_flags_identified or []) | join(', ') or 'N/A' }}</p>
+                    <p class="text-red-500">{{ (report.gemini_red_flags_identified or []) | join(', ') or 'N/A' }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2 text-red-500">Red Flags</p>
@@ -289,15 +289,15 @@
                 </div>
             </div>
 
-            <!-- Timing row: 3 columns -->
+            <!-- Timing row: ChatGPT / Gemini / Groq -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Timings (ms)</p>
-                    <p class="text-gray-600">Request: {{ (report.gemini_request_ms | round(1) ~ ' ms') if report.gemini_request_ms is not none else 'N/A' }}</p>
+                    <p class="text-gray-600">Request: {{ (report.chatgpt_request_ms | round(1) ~ ' ms') if report.chatgpt_request_ms is not none else 'N/A' }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Timings (ms)</p>
-                    <p class="text-gray-600">Request: {{ (report.chatgpt_request_ms | round(1) ~ ' ms') if report.chatgpt_request_ms is not none else 'N/A' }}</p>
+                    <p class="text-gray-600">Request: {{ (report.gemini_request_ms | round(1) ~ ' ms') if report.gemini_request_ms is not none else 'N/A' }}</p>
                 </div>
                 <div>
                     <p class="font-bold text-lg text-gray-900 mb-2">Timings (ms)</p>

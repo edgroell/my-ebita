@@ -2,9 +2,10 @@
 
 from dotenv import load_dotenv
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict
 import asyncio
 import requests
+from datetime import datetime
 
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel
@@ -33,7 +34,7 @@ class AgenticBot:
     - RAG search scoped to a specific earnings call transcript
     - Optional Google Custom Search tool
     - Conversation history tracking
-    - Optional Langfuse observability (if available)
+    - Langfuse observability
     """
 
     def __init__(
@@ -55,12 +56,30 @@ class AgenticBot:
         # Conversation history
         self.conversation_history: List[ConversationTurn] = []
         
-        # Current trace for grouping operations
-        self._current_trace = None
-        self._current_observation = None
+        # Tool call tracking per query
+        self._tool_calls_this_query: Dict[str, int] = {}
         
-        # Try to initialize Langfuse (optional) - DISABLED for now due to API issues
+        # Initialize Langfuse (optional)
         self._lf = None
+        if LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY and LANGFUSE_HOST:
+            try:
+                from langfuse import Langfuse
+                import langfuse
+                
+                self._lf = Langfuse(
+                    public_key=LANGFUSE_PUBLIC_KEY,
+                    secret_key=LANGFUSE_SECRET_KEY,
+                    host=LANGFUSE_HOST
+                )
+                # Test the connection
+                self._lf.auth_check()
+
+                print(f"✓ Langfuse observability enabled (version: {langfuse.__version__ if hasattr(langfuse, '__version__') else 'unknown'})") #type: ignore
+                # print(f"  Available methods: {[m for m in dir(self._lf) if not m.startswith('_')]}")
+                
+            except Exception as e:
+                print(f"⚠ Langfuse initialization failed: {e}")
+                self._lf = None
 
         # Optional Google Custom Search tool
         self._google_api_key = google_api_key or GOOGLE_API_KEY
@@ -70,25 +89,31 @@ class AgenticBot:
         if self._google_api_key and self._google_cse_id:
             default_prompt = (
                 f"You are a financial analysis assistant for earnings call transcript {transcript_id}.\n\n"
-                "TOOL USAGE RULES (FOLLOW STRICTLY):\n\n"
-                "1. TRANSCRIPT QUESTIONS → Use 'search_transcript' tool:\n"
+                "CRITICAL TOOL USAGE RULES (FOLLOW EXACTLY):\n\n"
+                "1. TRANSCRIPT QUESTIONS → Use 'search_transcript' tool ONCE:\n"
                 "   - Revenue, earnings, margins, guidance mentioned in the call\n"
                 "   - Management comments, strategies, business updates\n"
                 "   - Q&A responses from the earnings call\n\n"
-                "2. CURRENT/MARKET DATA → Use 'search_web' tool:\n"
+                "2. CURRENT/MARKET DATA → Use 'search_web' tool ONCE:\n"
                 "   - Current stock prices (ALWAYS use web search)\n"
                 "   - Recent news or market conditions\n"
                 "   - Competitor information\n"
                 "   - Industry trends\n\n"
-                "3. IMPORTANT LIMITS:\n"
-                "   - Only call each tool ONCE per question\n"
-                "   - If transcript search finds nothing relevant, switch to web search\n"
-                "   - If both tools return no results, respond with 'Information not available'\n"
-                "   - DO NOT repeatedly call the same tool with different queries\n\n"
-                "4. Keep answers concise and based on tool results only.\n"
+                "3. MANDATORY LIMITS - VIOLATING THESE IS AN ERROR:\n"
+                "   - Each tool can be called EXACTLY ONCE per question\n"
+                "   - After receiving tool results, you MUST formulate an answer immediately\n"
+                "   - DO NOT call the same tool again with rephrased queries\n"
+                "   - DO NOT call tools sequentially to 'verify' or 'improve' results\n"
+                "   - If a tool returns results, those ARE the final results - use them\n"
+                "   - If a tool returns 'No results found', accept that and tell the user\n\n"
+                "4. Response Strategy:\n"
+                "   - If transcript search finds nothing → tell user and suggest they might need web search\n"
+                "   - If web search returns results → summarize them immediately\n"
+                "   - If web search returns 'No results found' → tell user no information available\n"
+                "   - DO NOT try alternative queries or call tools multiple times\n\n"
+                "5. Keep answers concise and based strictly on the tool results received.\n"
             )
         else:
-            # No web search available
             default_prompt = (
                 f"You are a financial analysis assistant for earnings call transcript {transcript_id}.\n\n"
                 "IMPORTANT LIMITATIONS:\n"
@@ -115,8 +140,9 @@ class AgenticBot:
             system_prompt=default_prompt,
             retries=1,
         )
-        
-        # Register tools using the @agent.tool decorator pattern
+        self._model_name = f"openai:{openai_model}"
+
+        # Register tools
         @self.agent.tool
         def search_transcript(ctx: RunContext[None], query: str) -> str:
             """
@@ -156,9 +182,18 @@ class AgenticBot:
         
         print(f"✓ Agent initialized with model: {openai_model}")
 
-    def _create_trace(self, name: str, metadata: Optional[dict] = None):
-        """Create a new Langfuse trace - DISABLED"""
-        return None
+    def _log_to_langfuse(self, event_name: str, metadata: dict):
+        """Log a small span as an event under the current trace context."""
+        if not self._lf:
+            return
+        try:
+            with self._lf.start_as_current_span(name=event_name):
+                try:
+                    self._lf.update_current_span(metadata=metadata)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[Langfuse] start_as_current_span failed: {e}")
 
     def _build_conversation_context(self) -> str:
         """Build conversation history context for the prompt"""
@@ -177,13 +212,24 @@ class AgenticBot:
     
     def _rag_search_impl(self, query: str) -> str:
         """RAG search implementation"""
+        # Check if already called
+        if self._tool_calls_this_query.get("search_transcript", 0) >= 1:
+            print("⚠️ [RAG Search] Already called once - blocking repeated call")
+            return "ERROR: search_transcript was already called. You must use the previous results."
+        
+        self._tool_calls_this_query["search_transcript"] = self._tool_calls_this_query.get("search_transcript", 0) + 1
+        
         try:
             print(f"🔍 [RAG Search] Query: '{query}'")
+            
+            self._log_to_langfuse("rag_search", {
+                "query": query,
+                "transcript_id": self.transcript_id
+            })
             
             docs = self.rag.retrieve_context(query, transcript_id=self.transcript_id)
             ctx_text = self.rag.build_context_text(docs)
             
-            # Aggressive truncation
             MAX_CONTEXT_CHARS = 6000
             if len(ctx_text) > MAX_CONTEXT_CHARS:
                 ctx_text = ctx_text[:MAX_CONTEXT_CHARS] + "\n\n[Context truncated...]"
@@ -191,8 +237,13 @@ class AgenticBot:
             
             print(f"✅ [RAG Search] Retrieved {len(docs)} docs, {len(ctx_text)} chars")
             
+            self._log_to_langfuse("rag_search_complete", {
+                "query": query,
+                "docs_count": len(docs),
+                "text_length": len(ctx_text)
+            })
+            
             if not ctx_text.strip() or len(docs) == 0:
-                # Be more explicit when no results found
                 if self._google_api_key and self._google_cse_id:
                     return "No information found in the earnings call transcript for this query. Consider using web search for current data."
                 else:
@@ -202,12 +253,25 @@ class AgenticBot:
             
         except Exception as e:
             print(f"❌ [RAG Search] Error: {e}")
+            self._log_to_langfuse("rag_search_error", {"query": query, "error": str(e)})
             return f"Error searching transcript: {e}"
 
-    def _google_search_impl(self, query: str, max_results: int = 2) -> str:
+    def _google_search_impl(self, query: str, max_results: int = 5) -> str:
         """Google search implementation"""
+        # Check if already called
+        if self._tool_calls_this_query.get("search_web", 0) >= 1:
+            print("⚠️ [Google Search] Already called once - blocking repeated call")
+            return "ERROR: search_web was already called. You must use the previous results and provide an answer now."
+        
+        self._tool_calls_this_query["search_web"] = self._tool_calls_this_query.get("search_web", 0) + 1
+        
         try:
             print(f"🌐 [Google Search] Query: '{query}'")
+            
+            self._log_to_langfuse("google_search", {
+                "query": query,
+                "max_results": max_results
+            })
             
             params = {
                 "key": self._google_api_key,
@@ -223,91 +287,205 @@ class AgenticBot:
             
             if not items:
                 print(f"⚠️ [Google Search] No results found")
+                self._log_to_langfuse("google_search_no_results", {"query": query})
                 return "No web results found for this query."
 
             lines = []
-            MAX_SNIPPET_LENGTH = 200
             for i, it in enumerate(items, start=1):
                 title = it.get("title", "Untitled")
                 link = it.get("link", "")
                 snippet = it.get("snippet", "")
                 
-                if len(snippet) > MAX_SNIPPET_LENGTH:
-                    snippet = snippet[:MAX_SNIPPET_LENGTH] + "..."
+                if len(title) > 80:
+                    title = title[:80] + "..."
                 
-                if len(title) > 60:
-                    title = title[:60] + "..."
-                
-                lines.append(f"{i}. {title}\n{snippet}")
+                lines.append(f"Result {i}:\nTitle: {title}\nURL: {link}\nContent: {snippet}\n")
 
-            result = "\n\n".join(lines)
+            result = "\n".join(lines)
             
-            MAX_TOTAL_LENGTH = 2000
+            MAX_TOTAL_LENGTH = 12000
             if len(result) > MAX_TOTAL_LENGTH:
-                result = result[:MAX_TOTAL_LENGTH] + "\n[Truncated...]"
+                result = result[:MAX_TOTAL_LENGTH] + "\n[Results truncated - showing first portion]"
                 print(f"⚠️ [Google Search] Results truncated to {MAX_TOTAL_LENGTH} chars")
             
             print(f"✅ [Google Search] Found {len(items)} results, {len(result)} chars")
+            
+            self._log_to_langfuse("google_search_complete", {
+                "query": query,
+                "results_count": len(items),
+                "text_length": len(result)
+            })
             
             return result
             
         except Exception as e:
             print(f"❌ [Google Search] Error: {e}")
+            self._log_to_langfuse("google_search_error", {"query": query, "error": str(e)})
             return f"Error searching the web: {e}"
 
     # --- Agent Invocation Methods ---
 
     async def invoke_async(self, user_message: str) -> str:
         """Invoke the agent asynchronously with conversation history"""
+        start_time = datetime.now()
+        
+        # Reset tool call counter for new query
+        self._tool_calls_this_query = {}
+
         try:
             print(f"\n{'='*80}")
             print(f"💬 [Bot] Processing: {user_message[:100]}...")
             print(f"{'='*80}")
-            
+
+            if self._lf:
+                try:
+                    with self._lf.start_as_current_span(name="chatbot_query"):
+                        try:
+                            self._lf.update_current_trace(
+                                name="chatbot_query",
+                                user_id=self.user_id or "anonymous",
+                                metadata={
+                                    "transcript_id": self.transcript_id,
+                                    "conversation_turn": len(self.conversation_history) + 1
+                                },
+                            )
+                        except Exception as e:
+                            print(f"[Langfuse] update_current_trace failed: {e}")
+
+                        self._log_to_langfuse("chatbot_query_start", {
+                            "transcript_id": self.transcript_id,
+                            "message": user_message[:200],
+                            "user_id": self.user_id,
+                            "timestamp": start_time.isoformat()
+                        })
+
+                        conversation_context = self._build_conversation_context()
+                        full_message = f"{conversation_context}\n{user_message}" if conversation_context else user_message
+
+                        output_text: str
+                        if self._lf:
+                            try:
+                                with self._lf.start_as_current_generation(
+                                    name="agent_response",
+                                    model=self._model_name,
+                                ):
+                                    try:
+                                        self._lf.update_current_generation(input=full_message)
+                                    except Exception:
+                                        pass
+
+                                    result = await asyncio.wait_for(
+                                        self.agent.run(full_message),
+                                        timeout=45.0
+                                    )
+
+                                    output_text = str(getattr(result, "output", result))
+                                    if output_text.startswith("AgentRunResult("):
+                                        import re
+                                        m = re.search(r'output="([^"]*(?:\\.[^"]*)*)"', output_text) or \
+                                            re.search(r"output='([^']*(?:\\.[^']*)*)'", output_text)
+                                        if m:
+                                            output_text = m.group(1)
+
+                                    output_text = output_text.replace('\\n', '\n').replace("\\'", "'").replace('\\"', '"')
+
+                                    try:
+                                        self._lf.update_current_generation(output=output_text)
+                                    except Exception:
+                                        pass
+                            except Exception as e:
+                                print(f"[Langfuse] start_as_current_generation failed: {e}")
+                                # Fallback: run without Langfuse generation
+                                result = await asyncio.wait_for(self.agent.run(full_message), timeout=30.0)
+                                output_text = str(getattr(result, "output", result))
+                                if output_text.startswith("AgentRunResult("):
+                                    import re
+                                    m = re.search(r'output="([^"]*(?:\\.[^"]*)*)"', output_text) or \
+                                        re.search(r"output='([^']*(?:\\.[^']*)*)'", output_text)
+                                    if m:
+                                        output_text = m.group(1)
+                                output_text = output_text.replace('\\n', '\n').replace("\\'", "'").replace('\\"', '"')
+                        else:
+                            # No Langfuse: normal execution
+                            result = await asyncio.wait_for(self.agent.run(full_message), timeout=30.0)
+                            output_text = str(getattr(result, "output", result))
+                            if output_text.startswith("AgentRunResult("):
+                                import re
+                                m = re.search(r'output="([^"]*(?:\\.[^"]*)*)"', output_text) or \
+                                    re.search(r"output='([^']*(?:\\.[^']*)*)'", output_text)
+                                if m:
+                                    output_text = m.group(1)
+                            output_text = output_text.replace('\\n', '\n').replace("\\'", "'").replace('\\"', '"')
+
+                        print(f"✅ [Bot] Response generated: {len(output_text)} chars")
+
+                        elapsed = (datetime.now() - start_time).total_seconds()
+                        self._log_to_langfuse("chatbot_query_complete", {
+                            "transcript_id": self.transcript_id,
+                            "user_id": self.user_id,
+                            "response_length": len(output_text),
+                            "elapsed_seconds": elapsed,
+                            "conversation_turn": len(self.conversation_history) + 1
+                        })
+
+                        turn = ConversationTurn(question=user_message, answer=output_text)
+                        self.conversation_history.append(turn)
+
+                        if self._lf:
+                            try:
+                                self._lf.flush()
+                                print("✓ Langfuse data flushed")
+                            except Exception as e:
+                                print(f"⚠ Langfuse flush failed: {e}")
+
+                        return output_text
+
+                except Exception as e:
+                    print(f"[Langfuse] root span failed: {e}")
+
+            # Fallback path (Langfuse unavailable or failed early)
             conversation_context = self._build_conversation_context()
             full_message = f"{conversation_context}\n{user_message}" if conversation_context else user_message
-            
-            # Add timeout to prevent infinite loops
-            result = await asyncio.wait_for(
-                self.agent.run(full_message),
-                timeout=30.0  # 30 second timeout
-            )
-            
-            # Extract the actual text from the result
-            if hasattr(result, 'output'):
-                output_text = str(result.output)
-            else:
-                output_text = str(result)
-            
-            # Remove AgentRunResult wrapper if present
+
+            result = await asyncio.wait_for(self.agent.run(full_message), timeout=45.0)
+            output_text = str(getattr(result, "output", result))
             if output_text.startswith("AgentRunResult("):
-                # Extract content between output=" and the closing "
                 import re
-                match = re.search(r'output="([^"]*(?:\\.[^"]*)*)"', output_text)
-                if match:
-                    output_text = match.group(1)
-                else:
-                    # Fallback: try to extract anything after output=
-                    match = re.search(r"output='([^']*(?:\\.[^']*)*)'", output_text)
-                    if match:
-                        output_text = match.group(1)
-            
-            # Clean up formatting and escape sequences
+                m = re.search(r'output="([^"]*(?:\\.[^"]*)*)"', output_text) or \
+                    re.search(r"output='([^']*(?:\\.[^']*)*)'", output_text)
+                if m:
+                    output_text = m.group(1)
             output_text = output_text.replace('\\n', '\n').replace("\\'", "'").replace('\\"', '"')
-            
+
             print(f"✅ [Bot] Response generated: {len(output_text)} chars")
-            
             turn = ConversationTurn(question=user_message, answer=output_text)
             self.conversation_history.append(turn)
-            
             return output_text
-            
+
         except asyncio.TimeoutError:
-            print(f"❌ [Bot] Timeout after 30 seconds - agent may be in a loop")
-            return "Sorry, the request took too long. The agent may have encountered an issue. Please try rephrasing your question."
+            print("❌ [Bot] Timeout - agent may be calling tools repeatedly")
+            print(f"   Tool calls this query: {self._tool_calls_this_query}")
+            self._log_to_langfuse("chatbot_timeout", {
+                "transcript_id": self.transcript_id,
+                "user_id": self.user_id,
+                "tool_calls": self._tool_calls_this_query
+            })
+            if self._lf:
+                self._lf.flush()
+            return "Sorry, the request took too long. This usually happens when searching for information that isn't available. Please try rephrasing your question or ask about information from the earnings call transcript."
         except Exception as e:
             print(f"❌ [Bot] Error: {e}")
+            self._log_to_langfuse("chatbot_error", {
+                "transcript_id": self.transcript_id,
+                "user_id": self.user_id,
+                "error": str(e)
+            })
+            if self._lf:
+                self._lf.flush()
             raise
+        finally:
+            if hasattr(self, "_current_trace_id"):
+                delattr(self, "_current_trace_id")
 
     def invoke(self, user_message: str) -> str:
         """Synchronous wrapper for invoke_async"""
@@ -321,6 +499,14 @@ class AgenticBot:
         """Clear conversation history"""
         self.conversation_history.clear()
         print("[Bot] Conversation history cleared")
+        
+        self._log_to_langfuse("conversation_cleared", {
+            "transcript_id": self.transcript_id,
+            "user_id": self.user_id
+        })
+        
+        if self._lf:
+            self._lf.flush()
 
     async def stream_async(self, user_message: str):
         """Stream the agent response asynchronously"""

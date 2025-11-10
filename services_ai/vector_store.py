@@ -2,7 +2,6 @@
 
 import os
 from typing import List, Optional, Any, Dict
-from pydantic import SecretStr
 
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
@@ -28,13 +27,11 @@ class ChromaVectorStore:
         # Ensure API key is a string, not a callable
         openai_api_key = api_key or os.getenv("OPENAI_API_KEY")
         if callable(openai_api_key):
-            # If it's a callable, call it immediately to get the string
             openai_api_key = openai_api_key()
         
         # Create embeddings with explicit sync client
         self.embeddings = OpenAIEmbeddings(
             model=embedding_model,
-            # Explicitly disable async
             async_client=None
         )
         

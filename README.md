@@ -37,7 +37,7 @@ Running an AI Analysis
 
 ## Project Status
 
-As of _29-AUG-2025_, project is: _MVP_
+As of _10-NOV-2025_, project is: _MVP_
 
 ## API Documentation
 
@@ -62,16 +62,16 @@ All endpoints require authentication except `/login` and `/register`.
 
 ## Room for Improvement
 
-As of _23-OCT-2025_, project is: _MVP with API Documentation_
-
 ✅ app.py & frontend updates
 ✅ pydantic_ai agent bot
 ✅ user profile page
 ✅ download report feature
 ✅ Log and API limits
 ✅ API Docs
--> LangFuse integration
--> Presentation
+✅ LangFuse integration
+
+-> Saving ChatBot Conversations
+-> Track AI Analysis too
 
 ## Acknowledgements
 
