@@ -144,7 +144,7 @@ class AgenticBot:
 
         # Register tools
         @self.agent.tool
-        def search_transcript(ctx: RunContext[None], query: str) -> str:
+        def search_transcript(ctx: RunContext[object], query: str) -> str:
             """
             Search the earnings call transcript for information mentioned during the call.
             
@@ -161,7 +161,7 @@ class AgenticBot:
         
         if self._google_api_key and self._google_cse_id:
             @self.agent.tool
-            def search_web(ctx: RunContext[None], query: str) -> str:
+            def search_web(ctx: RunContext[object], query: str) -> str:
                 """
                 Search the web for current market data and recent information.
                 
@@ -187,11 +187,10 @@ class AgenticBot:
         if not self._lf:
             return
         try:
-            with self._lf.start_as_current_span(name=event_name):
-                try:
-                    self._lf.update_current_span(metadata=metadata)
-                except Exception:
-                    pass
+            with self._lf.start_as_current_observation(
+                as_type="span", name=event_name
+            ) as span:
+                span.update(metadata=metadata)
         except Exception as e:
             print(f"[Langfuse] start_as_current_span failed: {e}")
 
@@ -339,16 +338,22 @@ class AgenticBot:
 
             if self._lf:
                 try:
-                    with self._lf.start_as_current_span(name="chatbot_query"):
+                    with self._lf.start_as_current_observation(
+                        as_type="span", name="chatbot_query"
+                    ):
                         try:
-                            self._lf.update_current_trace(
-                                name="chatbot_query",
-                                user_id=self.user_id or "anonymous",
-                                metadata={
-                                    "transcript_id": self.transcript_id,
-                                    "conversation_turn": len(self.conversation_history) + 1
-                                },
+                            update_current_trace = getattr(
+                                self._lf, "update_current_trace", None
                             )
+                            if callable(update_current_trace):
+                                update_current_trace(
+                                    name="chatbot_query",
+                                    user_id=self.user_id or "anonymous",
+                                    metadata={
+                                        "transcript_id": self.transcript_id,
+                                        "conversation_turn": len(self.conversation_history) + 1
+                                    },
+                                )
                         except Exception as e:
                             print(f"[Langfuse] update_current_trace failed: {e}")
 
@@ -365,12 +370,13 @@ class AgenticBot:
                         output_text: str
                         if self._lf:
                             try:
-                                with self._lf.start_as_current_generation(
+                                with self._lf.start_as_current_observation(
+                                    as_type="generation",
                                     name="agent_response",
                                     model=self._model_name,
-                                ):
+                                ) as generation:
                                     try:
-                                        self._lf.update_current_generation(input=full_message)
+                                        generation.update(input=full_message)
                                     except Exception:
                                         pass
 
@@ -390,11 +396,11 @@ class AgenticBot:
                                     output_text = output_text.replace('\\n', '\n').replace("\\'", "'").replace('\\"', '"')
 
                                     try:
-                                        self._lf.update_current_generation(output=output_text)
+                                        generation.update(output=output_text)
                                     except Exception:
                                         pass
                             except Exception as e:
-                                print(f"[Langfuse] start_as_current_generation failed: {e}")
+                                print(f"[Langfuse] generation observation failed: {e}")
                                 # Fallback: run without Langfuse generation
                                 result = await asyncio.wait_for(self.agent.run(full_message), timeout=30.0)
                                 output_text = str(getattr(result, "output", result))
@@ -519,8 +525,8 @@ class AgenticBot:
             full_message = f"{conversation_context}\n{user_message}" if conversation_context else user_message
             
             async with self.agent.run_stream(full_message) as result:
-                async for message in result.stream():
-                    text = str(message)
+                async for message in result.stream_text():
+                    text = message
                     accumulated.append(text)
                     yield message
                     
