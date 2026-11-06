@@ -279,7 +279,7 @@ def login():
         data = _read_body()
         username = (data.get('username') or data.get('username_or_email') or '').strip()
         password = (data.get('password') or '').strip()
-        remember_me = data.get('remember_me', False)
+        remember_me = str(data.get('remember_me', False)).strip().lower() in {'1', 'true', 'on', 'yes'}
 
         app.logger.info(f"Login attempt for username: {username}")
 
