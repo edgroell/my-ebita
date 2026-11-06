@@ -67,8 +67,15 @@ class NinjasService:
                     f"Unexpected top-level response format from API Ninjas: {type(response_json)}. Full response: {response.text}")
 
         except requests.exceptions.HTTPError as e:
-            error_message = f"API Ninjas returned an HTTP error {e.response.status_code}: {e.response.text}"
-            print(f"Error details from API Ninjas: {e.response.text}")
+            response = e.response
+            if response is not None:
+                status_code = response.status_code
+                response_text = response.text
+                error_message = f"API Ninjas returned an HTTP error {status_code}: {response_text}"
+                print(f"Error details from API Ninjas: {response_text}")
+            else:
+                error_message = f"API Ninjas returned an HTTP error: {e}"
+                print(f"Error details from API Ninjas: {e}")
             raise ValueError(error_message) from e
         except requests.exceptions.ConnectionError as e:
             raise requests.exceptions.RequestException(f"Network connection error to API Ninjas: {e}") from e
