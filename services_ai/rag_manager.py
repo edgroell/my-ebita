@@ -157,12 +157,13 @@ if __name__ == "__main__":
     from services_api.chatgpt_service import ChatGPTService
 
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
     vector_store = ChromaVectorStore(
         collection_name="transcripts",
         persist_directory="data/chroma_langchain_db",
-        api_key=OPENAI_API_KEY,
-        embedding_model="text-embedding-3-small"
+        api_key=MISTRAL_API_KEY,
+        embedding_model="mistral-embed"
     )
 
     # Create ChatGPT service and inject it

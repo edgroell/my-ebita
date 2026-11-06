@@ -30,6 +30,7 @@ from services_ai.vector_store import ChromaVectorStore
 from services_ai.agentic_bot import AgenticBot
 
 # Import API services
+from services_api.alphavantage_service import AlphaVantageService
 from services_api.ninjas_service import NinjasService
 from services_api.chatgpt_service import ChatGPTService
 from services_api.gemini_service import GeminiService
@@ -115,12 +116,19 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 API_NINJAS_KEY = os.environ.get("API_NINJAS_KEY")
+ALPHA_VANTAGE_API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY")
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
 # Create ChatGPT service first (used by both RAG and analysis)
 chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY, model_name=DEFAULT_CHATGPT_MODEL) if OPENAI_API_KEY else None
 
 # Initialize other services
 ninjas_service = NinjasService(api_key=API_NINJAS_KEY) if API_NINJAS_KEY else None
+alphavantage_service = (
+    AlphaVantageService(api_key=ALPHA_VANTAGE_API_KEY)
+    if ALPHA_VANTAGE_API_KEY
+    else None
+)
 gemini_service = GeminiService(api_key=GEMINI_API_KEY, model_name=DEFAULT_GEMINI_MODEL) if GEMINI_API_KEY else None
 groq_service = GroqService(api_key=GROQ_API_KEY, model_name=DEFAULT_GROQ_MODEL) if GROQ_API_KEY else None
 
@@ -128,7 +136,7 @@ groq_service = GroqService(api_key=GROQ_API_KEY, model_name=DEFAULT_GROQ_MODEL) 
 vector_store = None
 rag_manager = None
 try:
-    vector_store = ChromaVectorStore()
+    vector_store = ChromaVectorStore(api_key=MISTRAL_API_KEY)
     rag_manager = RAGManager(
         vector_store=vector_store,
         chatgpt_service=chatgpt_service
@@ -181,8 +189,9 @@ def _index_transcript_to_rag(transcript: EarningsCallTranscript) -> bool:
             "ticker_symbol": transcript.ticker_symbol,
             "fiscal_year": transcript.fiscal_year,
             "fiscal_quarter": transcript.fiscal_quarter,
-            "call_date": transcript.call_date.isoformat() if transcript.call_date else None
         }
+        if transcript.call_date:
+            metadata["call_date"] = transcript.call_date.isoformat()
         
         rag_manager.add_texts(
             texts=[transcript_text],
@@ -207,6 +216,7 @@ def status():
         "message": "EBITA API is operational",
         "services": {
             "ninjas": ninjas_service is not None,
+            "alphavantage": alphavantage_service is not None,
             "chatgpt": chatgpt_service is not None,
             "gemini": gemini_service is not None,
             "groq": groq_service is not None,
@@ -454,9 +464,9 @@ def dashboard():
 @limiter.limit("10 per hour")
 def acquire_transcript():
     """Acquire transcript and automatically index to RAG"""
-    if not ninjas_service:
-        app.logger.error("Acquire transcript failed: Ninjas service not available")
-        return jsonify({"error": "Ninjas service not available"}), 503
+    if not alphavantage_service:
+        app.logger.error("Acquire transcript failed: Alpha Vantage service not available")
+        return jsonify({"error": "Alpha Vantage service not available"}), 503
     
     ticker = request.form.get('ticker', '').strip().upper()
     year = request.form.get('year', type=int)
@@ -474,7 +484,11 @@ def acquire_transcript():
         company = data_manager.get_company_by_ticker(ticker)
         if not company:
             app.logger.info(f"Fetching company profile for {ticker}")
-            company_profile = ninjas_service.get_company_profile_basic(ticker)
+            company_profile = (
+                ninjas_service.get_company_profile_basic(ticker)
+                if ninjas_service
+                else None
+            )
             if company_profile:
                 company = data_manager.add_company(
                     ticker_symbol=company_profile.get('symbol') or "",
@@ -482,6 +496,16 @@ def acquire_transcript():
                     logo_url=company_profile.get('logo_url')
                 )
                 app.logger.info(f"Company created: {ticker}")
+            else:
+                company = data_manager.add_company(
+                    ticker_symbol=ticker,
+                    company_name=ticker,
+                )
+                app.logger.info(f"Created company record using ticker only: {ticker}")
+            if not company:
+                app.logger.error(f"Failed to create company record for {ticker}")
+                flash(f"Failed to create company record for {ticker}.", 'danger')
+                return redirect(url_for('dashboard'))
         
         # Check if transcript exists
         if year is None or quarter is None:
@@ -493,15 +517,22 @@ def acquire_transcript():
             flash(f"Transcript already exists (ID: {existing.transcript_id})", 'info')
             return redirect(url_for('dashboard'))
         
-        # Fetch transcript from Ninjas API
-        app.logger.info(f"Fetching transcript from Ninjas API: {ticker} Q{quarter} {year}")
-        transcript_data = ninjas_service.get_earnings_transcript(ticker, year, quarter)
+        # Fetch transcript from Alpha Vantage
+        app.logger.info(f"Fetching transcript from Alpha Vantage: {ticker} Q{quarter} {year}")
+        transcript_data = alphavantage_service.get_earnings_transcript(
+            ticker, year, quarter
+        )
         if not transcript_data:
             app.logger.warning(f"Transcript not found: {ticker} Q{quarter} {year}")
             flash(f"Transcript not found for {ticker} Q{quarter} {year}", 'danger')
             return redirect(url_for('dashboard'))
         
-        call_date = datetime.strptime(transcript_data['date'], '%Y-%m-%d')
+        transcript_date = transcript_data.get('date')
+        call_date = (
+            datetime.strptime(transcript_date, '%Y-%m-%d')
+            if transcript_date
+            else None
+        )
         
         # Save transcript to database
         new_transcript = data_manager.add_transcript(
@@ -512,7 +543,7 @@ def acquire_transcript():
             call_date=call_date,
             transcript_raw=transcript_data['transcript'],
             transcript_split=transcript_data.get('transcript_split'),
-            source_url=f"API-Ninjas:{ticker}-{year}-Q{quarter}"
+            source_url=f"AlphaVantage:{ticker}-{year}-Q{quarter}"
         )
         
         if not new_transcript:

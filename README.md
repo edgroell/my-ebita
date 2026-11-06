@@ -13,7 +13,7 @@ To install this app, simply clone the repository and install the dependencies in
 ```bash
    pip install -r requirements.txt
 ```
-You'll also need to configure your API keys for the AI models and the data acquisition service in a .env file.
+You'll also need to configure your API keys for the AI models and the data acquisition service in a .env file. Set `MISTRAL_API_KEY` to enable Mistral-powered transcript embeddings for RAG indexing and retrieval.
 
 ## Usage
 
