@@ -15,10 +15,10 @@ from typing import Any, Dict
 import logging
 from logging.handlers import RotatingFileHandler
 from functools import wraps
-import concurrent.futures
 import time
 from threading import Thread
 from flask_swagger_ui import get_swaggerui_blueprint
+from sqlalchemy import inspect, text
 
 # Importing database and data manager
 from data.data_models import db, EarningsCallTranscript, User
@@ -35,6 +35,7 @@ from services_api.ninjas_service import NinjasService
 from services_api.chatgpt_service import ChatGPTService
 from services_api.gemini_service import GeminiService
 from services_api.groq_service import GroqService
+from services_api.mistral_service import MistralService
 
 from dotenv import load_dotenv
 
@@ -131,6 +132,7 @@ alphavantage_service = (
 )
 gemini_service = GeminiService(api_key=GEMINI_API_KEY, model_name=DEFAULT_GEMINI_MODEL) if GEMINI_API_KEY else None
 groq_service = GroqService(api_key=GROQ_API_KEY, model_name=DEFAULT_GROQ_MODEL) if GROQ_API_KEY else None
+mistral_service = MistralService(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
 # Initialize Vector Store and RAG Manager (reusing chatgpt_service)
 vector_store = None
@@ -220,6 +222,7 @@ def status():
             "chatgpt": chatgpt_service is not None,
             "gemini": gemini_service is not None,
             "groq": groq_service is not None,
+            "mistral": mistral_service is not None,
             "rag": rag_manager is not None
         },
         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -669,7 +672,7 @@ def delete_analysis_report(report_id):
 @login_required
 @limiter.limit("5 per hour")
 def request_analysis():
-    """Run AI analysis on transcript using all three services (in parallel)"""
+    """Run AI analysis on transcript using Mistral."""
     transcript_id = request.form.get('transcript_id', type=int)
     
     app.logger.info(f"AI analysis requested for transcript {transcript_id} by {current_user.username}")
@@ -686,155 +689,24 @@ def request_analysis():
         return redirect(url_for('dashboard'))
     
     transcript_text = _extract_transcript_text(transcript.transcript_raw)
-    
-    # Define analysis functions for each service
-    def analyze_with_chatgpt():
-        if not chatgpt_service:
-            return None
-        try:
-            app.logger.info(f"Running ChatGPT analysis for transcript {transcript_id}")
-            result = chatgpt_service.analyze_transcript(transcript_text)
-            app.logger.info(f"ChatGPT analysis complete for transcript {transcript_id}")
-            return {
-                'success': True,
-                'data': result.structured_output.model_dump() if hasattr(result, 'structured_output') else {},
-                'metrics': {
-                    'request_time_ms': result.request_time_ms,
-                    'model': result.model
-                }
-            }
-        except Exception as e:
-            app.logger.error(f"ChatGPT analysis failed for transcript {transcript_id}: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def analyze_with_gemini():
-        if not gemini_service:
-            return None
-        try:
-            app.logger.info(f"Running Gemini analysis for transcript {transcript_id}")
-            result = gemini_service.analyze_transcript(transcript_text)
-            app.logger.info(f"Gemini analysis complete for transcript {transcript_id}")
-            return {
-                'success': True,
-                'data': result.structured_output.model_dump() if hasattr(result, 'structured_output') else {},
-                'metrics': {
-                    'request_time_ms': result.request_time_ms,
-                    'model': result.model
-                }
-            }
-        except Exception as e:
-            app.logger.error(f"Gemini analysis failed for transcript {transcript_id}: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def analyze_with_groq():
-        if not groq_service:
-            return None
-        try:
-            app.logger.info(f"Running Groq analysis for transcript {transcript_id}")
-            result = groq_service.analyze_transcript(transcript_text)
-            app.logger.info(f"Groq analysis complete for transcript {transcript_id}")
-            return {
-                'success': True,
-                'data': result.structured_output.model_dump() if hasattr(result, 'structured_output') else {},
-                'metrics': {
-                    'request_time_ms': result.request_time_ms,
-                    'model': result.model
-                }
-            }
-        except Exception as e:
-            app.logger.error(f"Groq analysis failed for transcript {transcript_id}: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    # Run all three analyses in parallel using ThreadPoolExecutor
-    results = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        # Submit all tasks
-        future_chatgpt = executor.submit(analyze_with_chatgpt)
-        future_gemini = executor.submit(analyze_with_gemini)
-        future_groq = executor.submit(analyze_with_groq)
-        
-        # Wait for all to complete and collect results
-        chatgpt_result = future_chatgpt.result()
-        gemini_result = future_gemini.result()
-        groq_result = future_groq.result()
-        
-        if chatgpt_result:
-            results['chatgpt'] = chatgpt_result
-        if gemini_result:
-            results['gemini'] = gemini_result
-        if groq_result:
-            results['groq'] = groq_result
-    
-    app.logger.info(f"All parallel analyses complete for transcript {transcript_id}")
-    
-    # Helper function to extract nested fields
-    def get_field(service_results, field, default: Any = ""):
-        """Extract field from service results, checking both flat and nested structures"""
-        if not service_results or not service_results.get('success') or 'data' not in service_results:
-            return default
-        
-        data = service_results['data']
-        
-        # Try direct field access first
-        if field in data:
-            return data[field]
-        
-        # Try nested in key_metrics
-        if 'key_metrics' in data and field in data['key_metrics']:
-            return data['key_metrics'][field]
-        
-        # Special handling for score fields
-        if field in ['management_confidence_score', 'evasiveness_score_q_a']:
-            # Check key_metrics first
-            if 'key_metrics' in data:
-                return data['key_metrics'].get(field, default)
-        
-        return default
-    
-    report_data = {        
-        # ChatGPT fields
-        'chatgpt_summary': get_field(results.get('chatgpt'), 'summary'),
-        'chatgpt_concise_rationale': get_field(results.get('chatgpt'), 'concise_rationale'),
-        'chatgpt_overall_sentiment': get_field(results.get('chatgpt'), 'overall_sentiment', 'Neutral'),
-        'chatgpt_management_confidence_score': float(get_field(results.get('chatgpt'), 'management_confidence_score', 0.0)),
-        'chatgpt_evasiveness_score_q_a': float(get_field(results.get('chatgpt'), 'evasiveness_score_q_a', 0.0)),
-        'chatgpt_key_topics_discussed': get_field(results.get('chatgpt'), 'key_topics', []),
-        'chatgpt_red_flags_identified': get_field(results.get('chatgpt'), 'red_flags', []),
-        'chatgpt_raw_response_json': results.get('chatgpt', {}),
-        'chatgpt_request_ms': results.get('chatgpt', {}).get('metrics', {}).get('request_time_ms') if results.get('chatgpt') else None,
-        
-        # Gemini fields
-        'gemini_summary': get_field(results.get('gemini'), 'summary'),
-        'gemini_concise_rationale': get_field(results.get('gemini'), 'concise_rationale'),
-        'gemini_overall_sentiment': get_field(results.get('gemini'), 'overall_sentiment', 'Neutral'),
-        'gemini_management_confidence_score': float(get_field(results.get('gemini'), 'management_confidence_score', 0.0)),
-        'gemini_evasiveness_score_q_a': float(get_field(results.get('gemini'), 'evasiveness_score_q_a', 0.0)),
-        'gemini_key_topics_discussed': get_field(results.get('gemini'), 'key_topics', []),
-        'gemini_red_flags_identified': get_field(results.get('gemini'), 'red_flags', []),
-        'gemini_raw_response_json': results.get('gemini', {}),
-        'gemini_request_ms': results.get('gemini', {}).get('metrics', {}).get('request_time_ms') if results.get('gemini') else None,
+    if not mistral_service:
+        app.logger.error("Mistral analysis requested but MISTRAL_API_KEY is not configured")
+        flash("Mistral analysis is unavailable. Configure MISTRAL_API_KEY and try again.", 'danger')
+        return redirect(url_for('dashboard'))
 
-        # Groq fields
-        'groq_summary': get_field(results.get('groq'), 'summary'),
-        'groq_concise_rationale': get_field(results.get('groq'), 'concise_rationale'),
-        'groq_overall_sentiment': get_field(results.get('groq'), 'overall_sentiment', 'Neutral'),
-        'groq_management_confidence_score': float(get_field(results.get('groq'), 'management_confidence_score', 0.0)),
-        'groq_evasiveness_score_q_a': float(get_field(results.get('groq'), 'evasiveness_score_q_a', 0.0)),
-        'groq_key_topics_discussed': get_field(results.get('groq'), 'key_topics', []),
-        'groq_red_flags_identified': get_field(results.get('groq'), 'red_flags', []),
-        'groq_raw_response_json': results.get('groq', {}),
-        'groq_request_ms': results.get('groq', {}).get('metrics', {}).get('request_time_ms') if results.get('groq') else None,
-    }
-    
-    # Debug logging
-    app.logger.info(f"[DEBUG] ChatGPT confidence: {report_data['chatgpt_management_confidence_score']}")
-    app.logger.info(f"[DEBUG] Gemini confidence: {report_data['gemini_management_confidence_score']}")
-    app.logger.info(f"[DEBUG] Groq confidence: {report_data['groq_management_confidence_score']}")
+    try:
+        app.logger.info(f"Running Mistral analysis for transcript {transcript_id}")
+        result = mistral_service.analyze_transcript(transcript_text)
+        mistral_analysis_json = result.model_dump()
+    except Exception as e:
+        app.logger.error(f"Mistral analysis failed for transcript {transcript_id}: {e}", exc_info=True)
+        flash("Mistral analysis failed. Please try again later.", 'danger')
+        return redirect(url_for('dashboard'))
     
     new_report = data_manager.create_analysis_report(
         user_id=current_user.user_id,
         transcript_id=transcript_id,
-        **report_data
+        mistral_analysis_json=mistral_analysis_json
     )
     
     if new_report:
@@ -882,16 +754,10 @@ def view_raw_analysis_json(report_id, ai_name):
         app.logger.warning(f"Unauthorized raw JSON access: report {report_id} by {current_user.username}")
         return jsonify({"error": "Unauthorized"}), 403
     
-    # Get the appropriate raw response based on ai_name
-    if ai_name == 'chatgpt':
-        raw_data = report.chatgpt_raw_response_json
-    elif ai_name == 'gemini':
-        raw_data = report.gemini_raw_response_json
-    elif ai_name == 'groq':
-        raw_data = report.groq_raw_response_json
-    else:
+    if ai_name != 'mistral':
         app.logger.warning(f"Invalid AI service name requested: {ai_name}")
         return jsonify({"error": "Invalid AI service name"}), 400
+    raw_data = report.mistral_analysis_json
     
     return jsonify(raw_data), 200, {'Content-Type': 'application/json'}
 
@@ -913,6 +779,10 @@ def download_analysis_report(report_id):
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('dashboard'))
     
+    mistral_analysis = report.mistral_analysis_json or {}
+    structured_output = mistral_analysis.get('structured_output', {})
+    key_metrics = structured_output.get('key_metrics', {})
+
     # Prepare report data for download
     report_data = {
         'report_id': report.report_id,
@@ -927,35 +797,15 @@ def download_analysis_report(report_id):
             'call_date': report.transcript.call_date.isoformat() if report.transcript.call_date else None,
         },
         'analysis_date': report.analysis_date.isoformat() if report.analysis_date else None,
-        'gemini': {
-            'summary': report.gemini_summary,
-            'concise_rationale': report.gemini_concise_rationale,
-            'overall_sentiment': report.gemini_overall_sentiment,
-            'management_confidence_score': report.gemini_management_confidence_score,
-            'evasiveness_score_q_a': report.gemini_evasiveness_score_q_a,
-            'key_topics_discussed': report.gemini_key_topics_discussed,
-            'red_flags_identified': report.gemini_red_flags_identified,
-            'request_ms': report.gemini_request_ms,
-        },
-        'chatgpt': {
-            'summary': report.chatgpt_summary,
-            'concise_rationale': report.chatgpt_concise_rationale,
-            'overall_sentiment': report.chatgpt_overall_sentiment,
-            'management_confidence_score': report.chatgpt_management_confidence_score,
-            'evasiveness_score_q_a': report.chatgpt_evasiveness_score_q_a,
-            'key_topics_discussed': report.chatgpt_key_topics_discussed,
-            'red_flags_identified': report.chatgpt_red_flags_identified,
-            'request_ms': report.chatgpt_request_ms,
-        },
-        'groq': {
-            'summary': report.groq_summary,
-            'concise_rationale': report.groq_concise_rationale,
-            'overall_sentiment': report.groq_overall_sentiment,
-            'management_confidence_score': report.groq_management_confidence_score,
-            'evasiveness_score_q_a': report.groq_evasiveness_score_q_a,
-            'key_topics_discussed': report.groq_key_topics_discussed,
-            'red_flags_identified': report.groq_red_flags_identified,
-            'request_ms': report.groq_request_ms,
+        'mistral': {
+            'summary': structured_output.get('summary'),
+            'concise_rationale': structured_output.get('concise_rationale'),
+            'overall_sentiment': structured_output.get('overall_sentiment'),
+            'management_confidence_score': key_metrics.get('management_confidence_score'),
+            'evasiveness_score_q_a': key_metrics.get('evasiveness_score_q_a'),
+            'key_topics_discussed': structured_output.get('key_topics', []),
+            'red_flags_identified': structured_output.get('red_flags', []),
+            'request_ms': mistral_analysis.get('request_time_ms'),
         }
     }
     
@@ -986,6 +836,9 @@ def _get_or_create_bot(transcript_id: int) -> AgenticBot:
         if not rag_manager:
             app.logger.error("RAG Manager not initialized")
             raise RuntimeError("RAG Manager not initialized")
+        if not mistral_service:
+            app.logger.error("Mistral service not initialized")
+            raise RuntimeError("Mistral service not initialized; configure MISTRAL_API_KEY")
         
         # Get transcript to verify it exists
         transcript = data_manager.get_transcript_by_id(transcript_id)
@@ -999,7 +852,7 @@ def _get_or_create_bot(transcript_id: int) -> AgenticBot:
         bot = AgenticBot(
             rag_manager=rag_manager,
             transcript_id=transcript_id,
-            openai_model=DEFAULT_CHATGPT_MODEL,
+            mistral_service=mistral_service,
             google_api_key=os.environ.get("GOOGLE_API_KEY"),
             google_cse_id=os.environ.get("GOOGLE_CSE_ID"),
             user_id=str(current_user.user_id) if current_user.is_authenticated else None
@@ -1220,6 +1073,15 @@ if __name__ == '__main__':
     with app.app_context():
         try:
             db.create_all()
+            report_columns = {
+                column["name"]
+                for column in inspect(db.engine).get_columns("analysis_reports")
+            }
+            if "mistral_analysis_json" not in report_columns:
+                with db.engine.begin() as connection:
+                    connection.execute(
+                        text("ALTER TABLE analysis_reports ADD COLUMN mistral_analysis_json JSON")
+                    )
             app.logger.info("Database initialized")
             
             # Create test user
