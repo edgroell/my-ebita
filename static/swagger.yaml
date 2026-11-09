@@ -4,12 +4,12 @@ info:
   description: |
     **My EBITA** - Earnings Beat Indicator & Text Analyzer
     
-    An AI Financial Sidekick that provides comprehensive earnings call analysis using multiple AI models.
+    An AI Financial Sidekick that provides earnings call analysis using Mistral.
     
     ## Features
     - Multi-user support with authentication
     - Earnings transcript acquisition and storage
-    - Triple AI analysis (ChatGPT, Gemini, Groq)
+    - Mistral-powered earnings call analysis
     - RAG-powered conversational chatbot
     - Conversation history download
     
@@ -213,7 +213,7 @@ paths:
       tags:
         - Analysis
       summary: Run AI analysis on transcript
-      description: Analyze transcript using ChatGPT, Gemini, and Groq
+      description: Analyze transcript using Mistral
       security:
         - cookieAuth: []
       requestBody:
@@ -487,33 +487,34 @@ components:
         analysis_date:
           type: string
           format: date-time
-        gemini_summary:
-          type: string
-        chatgpt_summary:
-          type: string
-        groq_summary:
-          type: string
-        gemini_overall_sentiment:
-          type: string
-          enum: [Positive, Neutral, Negative]
-        chatgpt_overall_sentiment:
-          type: string
-          enum: [Positive, Neutral, Negative]
-        groq_overall_sentiment:
-          type: string
-          enum: [Positive, Neutral, Negative]
-        gemini_red_flags_identified:
-          type: array
-          items:
-            type: string
-        chatgpt_red_flags_identified:
-          type: array
-          items:
-            type: string
-        groq_red_flags_identified:
-          type: array
-          items:
-            type: string
+        mistral:
+          type: object
+          properties:
+            summary:
+              type: string
+            concise_rationale:
+              type: string
+            overall_sentiment:
+              type: string
+              enum: [Positive, Neutral, Negative]
+            management_confidence_score:
+              type: integer
+              minimum: 0
+              maximum: 100
+            evasiveness_score_q_a:
+              type: integer
+              minimum: 0
+              maximum: 100
+            key_topics_discussed:
+              type: array
+              items:
+                type: string
+            red_flags_identified:
+              type: array
+              items:
+                type: string
+            request_ms:
+              type: number
 
     ConversationHistory:
       type: object

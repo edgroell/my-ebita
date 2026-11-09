@@ -8,13 +8,15 @@ import requests
 from datetime import datetime
 
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.models.mistral import MistralModel
+from pydantic_ai.providers.mistral import MistralProvider
 from pydantic import BaseModel
 
 from .rag_manager import RAGManager
+from services_api.mistral_service import MistralService
 
 load_dotenv(".env")
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 GOOGLE_CSE_ID = os.environ.get("GOOGLE_CSE_ID")
 LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
@@ -41,17 +43,15 @@ class AgenticBot:
         self,
         rag_manager: RAGManager,
         transcript_id: int,
-        openai_model: str = "gpt-4o-mini",
+        mistral_service: MistralService,
         google_api_key: str | None = None,
         google_cse_id: str | None = None,
         user_id: str | None = None,
     ):
-        if not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY not set in environment.")
-
         self.rag = rag_manager
         self.transcript_id = transcript_id
         self.user_id = user_id
+        self.mistral_service = mistral_service
         
         # Conversation history
         self.conversation_history: List[ConversationTurn] = []
@@ -85,7 +85,12 @@ class AgenticBot:
         self._google_api_key = google_api_key or GOOGLE_API_KEY
         self._google_cse_id = google_cse_id or GOOGLE_CSE_ID
 
-        # Build the pydantic_ai Agent using OpenAI model
+        mistral_model = MistralModel(
+            mistral_service.model_name,
+            provider=MistralProvider(mistral_client=mistral_service.client),
+        )
+
+        # Build the pydantic_ai Agent using the shared Mistral client.
         if self._google_api_key and self._google_cse_id:
             default_prompt = (
                 f"You are a financial analysis assistant for earnings call transcript {transcript_id}.\n\n"
@@ -136,11 +141,11 @@ class AgenticBot:
             )
 
         self.agent = Agent(
-            model=f"openai:{openai_model}",
+            model=mistral_model,
             system_prompt=default_prompt,
             retries=1,
         )
-        self._model_name = f"openai:{openai_model}"
+        self._model_name = mistral_service.model_name
 
         # Register tools
         @self.agent.tool
@@ -180,7 +185,7 @@ class AgenticBot:
         else:
             print("⚠ Google Custom Search NOT enabled (missing API keys)")
         
-        print(f"✓ Agent initialized with model: {openai_model}")
+        print(f"✓ Agent initialized with Mistral model: {self._model_name}")
 
     def _log_to_langfuse(self, event_name: str, metadata: dict):
         """Log a small span as an event under the current trace context."""
@@ -280,7 +285,65 @@ class AgenticBot:
                 "safe": "off",
             }
             resp = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=10)
-            resp.raise_for_status()
+            if not resp.ok:
+                error_data: object = (
+                    resp.json()
+                    if "application/json" in resp.headers.get("Content-Type", "")
+                    else {}
+                )
+                error = error_data.get("error", {}) if isinstance(error_data, dict) else {}
+                errors = error.get("errors", []) if isinstance(error, dict) else []
+                raw_reason = errors[0].get("reason") if errors and isinstance(errors[0], dict) else None
+                reason = raw_reason if isinstance(raw_reason, str) else None
+                raw_message = error.get("message") if isinstance(error, dict) else None
+                message = raw_message if isinstance(raw_message, str) else None
+                reason_text = f" ({reason})" if reason else ""
+
+                if resp.status_code == 403:
+                    details = {
+                        "accessNotConfigured": (
+                            "Enable the Google Custom Search API for the Google Cloud project "
+                            "that owns the configured API key."
+                        ),
+                        "ipRefererBlocked": (
+                            "Update the API key's application restrictions to allow requests "
+                            "from this server."
+                        ),
+                        "API_KEY_IP_ADDRESS_BLOCKED": (
+                            "Update the API key's IP restrictions to allow this server."
+                        ),
+                        "dailyLimitExceeded": (
+                            "The Google Custom Search API daily quota has been reached."
+                        ),
+                        "quotaExceeded": (
+                            "The Google Custom Search API quota has been reached."
+                        ),
+                    }
+                    guidance = (
+                        details.get(reason)
+                        if reason
+                        else None
+                    ) or (
+                        "Check that the API key is enabled for Google Custom Search API, "
+                        "the key restrictions allow this server, and the Custom Search "
+                        "Engine ID is valid."
+                    )
+                    result = f"Google web search is unavailable (HTTP 403{reason_text}). {guidance}"
+                else:
+                    safe_message = f" Google reported: {message}" if message else ""
+                    result = (
+                        f"Google web search failed (HTTP {resp.status_code}{reason_text})."
+                        f"{safe_message}"
+                    )
+
+                print(f"❌ [Google Search] Request rejected: HTTP {resp.status_code}{reason_text}")
+                self._log_to_langfuse("google_search_error", {
+                    "query": query,
+                    "status_code": resp.status_code,
+                    "reason": reason,
+                })
+                return result
+
             data = resp.json()
             items = data.get("items", [])
             
@@ -317,10 +380,20 @@ class AgenticBot:
             
             return result
             
-        except Exception as e:
-            print(f"❌ [Google Search] Error: {e}")
-            self._log_to_langfuse("google_search_error", {"query": query, "error": str(e)})
-            return f"Error searching the web: {e}"
+        except requests.RequestException as e:
+            print(f"❌ [Google Search] Request failed: {type(e).__name__}")
+            self._log_to_langfuse("google_search_error", {
+                "query": query,
+                "error_type": type(e).__name__,
+            })
+            return "Google web search could not connect. Check the server's network connection and try again."
+        except (ValueError, KeyError, TypeError) as e:
+            print(f"❌ [Google Search] Invalid response: {type(e).__name__}")
+            self._log_to_langfuse("google_search_error", {
+                "query": query,
+                "error_type": type(e).__name__,
+            })
+            return "Google web search returned an invalid response. Please try again later."
 
     # --- Agent Invocation Methods ---
 
@@ -555,13 +628,23 @@ class AgenticBot:
 if __name__ == "__main__":
     from rag_manager import RAGManager
     from vector_store import ChromaVectorStore
+    from services_api.mistral_service import MistralService
 
+    mistral_api_key = os.environ.get("MISTRAL_API_KEY")
+    if not mistral_api_key:
+        raise RuntimeError("MISTRAL_API_KEY not set in environment.")
+    mistral_service = MistralService(api_key=mistral_api_key)
     print("Initializing vector store and RAG manager...")
     vector_store = ChromaVectorStore()
     rag_manager = RAGManager(vector_store=vector_store)
 
     print("\nCreating agentic bot...")
-    bot = AgenticBot(rag_manager=rag_manager, transcript_id=123, user_id="dev-test")
+    bot = AgenticBot(
+        rag_manager=rag_manager,
+        transcript_id=123,
+        mistral_service=mistral_service,
+        user_id="dev-test",
+    )
     
     # Test conversation
     queries = [

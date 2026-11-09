@@ -2,7 +2,7 @@
 
 An AI Financial Sidekick. My EBITA stands for Earnings Beat Indicator & Text Analyzer.
 
-This application is designed for the discerning investor who wants to look past the numbers. It provides a simple, clean interface to acquire earnings call transcripts and run a dual analysis using both Gemini and ChatGPT. The goal is to provide a comprehensive, "between-the-lines" look at management sentiment, confidence, and potential red flags, all on a single, easy-to-read report.
+This application is designed for the discerning investor who wants to look past the numbers. It provides a simple, clean interface to acquire earnings call transcripts and analyze them with Mistral. The report provides a concise look at management sentiment, confidence, key topics, and potential red flags.
 
 ![alt text](static/images/image.png)
 
@@ -13,7 +13,7 @@ To install this app, simply clone the repository and install the dependencies in
 ```bash
    pip install -r requirements.txt
 ```
-You'll also need to configure your API keys for the AI models and the data acquisition service in a .env file. Set `MISTRAL_API_KEY` to enable Mistral-powered transcript embeddings for RAG indexing and retrieval.
+You'll also need to configure your API keys for the AI models and the data acquisition service in a .env file. Set `MISTRAL_API_KEY` to enable Mistral analysis, chatbot responses, and transcript embeddings for RAG indexing and retrieval.
 
 ## Usage
 
@@ -32,7 +32,7 @@ Acquiring a Transcript
 
 Running an AI Analysis
 > - Once a transcript is acquired, enter its Transcript ID into the "Analyze Transcript" form.
-> - The app will then send the transcript to ChatGPT, Gemini and Groq for a triple AI analysis. The result is a single, comparative report.
+> - The app will then send the transcript to Mistral and save its analysis as a report.
 > - Analysis reports are stored per user and can be viewed or deleted from the dashboard.
 
 ## Project Status

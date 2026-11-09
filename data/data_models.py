@@ -94,7 +94,7 @@ class EarningsCallTranscript(db.Model):
 
 class AnalysisReport(db.Model):
     """
-    Stores AI-generated analysis for a transcript from multiple services.
+    Stores AI-generated analysis for a transcript.
     Each analysis report is owned by a user and linked to a specific transcript.
     """
     __tablename__ = 'analysis_reports'
@@ -102,6 +102,7 @@ class AnalysisReport(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=False)
     transcript_id = db.Column(db.Integer, db.ForeignKey('earnings_call_transcripts.transcript_id'), nullable=False)
     analysis_date = db.Column(db.DateTime, nullable=False, default=get_current_datetime)
+    mistral_analysis_json = db.Column(db.JSON)
 
     # Relationships
     user = db.relationship('User', foreign_keys=[user_id], back_populates='analysis_reports', lazy=True)

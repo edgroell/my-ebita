@@ -268,6 +268,7 @@ class DataManager:
     
     def create_analysis_report(self, user_id: int, 
                                transcript_id: int,
+                               mistral_analysis_json: Optional[Any] = None,
                                 chatgpt_summary: Optional[str] = None, 
                                chatgpt_concise_rationale: Optional[str] = None,
                                chatgpt_overall_sentiment: Optional[str] = None,
@@ -314,7 +315,7 @@ class DataManager:
                                groq_completion_tokens: Optional[int] = None,
                                ) -> Optional[AnalysisReport]:
         """
-        Creates a new AI analysis report, storing results from ChatGPT, Gemini and Groq.
+        Creates a new AI analysis report.
         Ensures the transcript belongs to the provided user_id.
         Returns the AnalysisReport object on success, None on error.
         """
@@ -330,6 +331,7 @@ class DataManager:
             new_report = AnalysisReport()
             new_report.user_id = user_id
             new_report.transcript_id = transcript_id
+            new_report.mistral_analysis_json = mistral_analysis_json
 
             new_report.chatgpt_summary = chatgpt_summary
             new_report.chatgpt_concise_rationale = chatgpt_concise_rationale
