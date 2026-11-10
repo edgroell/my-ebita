@@ -266,54 +266,12 @@ class DataManager:
             print(f"✗ Error deleting transcript: {e}")
             return False
     
-    def create_analysis_report(self, user_id: int, 
-                               transcript_id: int,
-                               mistral_analysis_json: Optional[Any] = None,
-                                chatgpt_summary: Optional[str] = None, 
-                               chatgpt_concise_rationale: Optional[str] = None,
-                               chatgpt_overall_sentiment: Optional[str] = None,
-                               chatgpt_sentiment_scores_by_segment: Optional[Any] = None,
-                               chatgpt_management_confidence_score: Optional[float] = None,
-                               chatgpt_evasiveness_score_q_a: Optional[float] = None,
-                               chatgpt_key_topics_discussed: Optional[Any] = None,
-                               chatgpt_red_flags_identified: Optional[Any] = None,
-                               chatgpt_raw_response_json: Optional[Any] = None,
-                               chatgpt_request_ms: Optional[float] = None,
-                               chatgpt_model: Optional[str] = None,
-                               chatgpt_temperature: Optional[float] = None,
-                               chatgpt_max_tokens: Optional[int] = None,
-                               chatgpt_total_tokens: Optional[int] = None,
-                               chatgpt_prompt_tokens: Optional[int] = None,
-                               chatgpt_completion_tokens: Optional[int] = None,
-                               gemini_summary: Optional[str] = None, 
-                               gemini_concise_rationale: Optional[str] = None,
-                               gemini_overall_sentiment: Optional[str] = None,
-                               gemini_sentiment_scores_by_segment: Optional[Any] = None,
-                               gemini_management_confidence_score: Optional[float] = None,
-                               gemini_evasiveness_score_q_a: Optional[float] = None,
-                               gemini_key_topics_discussed: Optional[Any] = None,
-                               gemini_red_flags_identified: Optional[Any] = None,
-                               gemini_raw_response_json: Optional[Any] = None,
-                               gemini_request_ms: Optional[float] = None,
-                               gemini_model: Optional[str] = None,
-                               gemini_prompt_tokens: Optional[int] = None,
-                               gemini_thoughts_tokens: Optional[int] = None,
-                               gemini_candidates_tokens: Optional[int] = None,
-                               groq_summary: Optional[str] = None, 
-                               groq_concise_rationale: Optional[str] = None,
-                               groq_overall_sentiment: Optional[str] = None,
-                               groq_sentiment_scores_by_segment: Optional[Any] = None,
-                               groq_management_confidence_score: Optional[float] = None,
-                               groq_evasiveness_score_q_a: Optional[float] = None,
-                               groq_key_topics_discussed: Optional[Any] = None,
-                               groq_red_flags_identified: Optional[Any] = None,
-                               groq_raw_response_json: Optional[Any] = None,
-                               groq_request_ms: Optional[float] = None,
-                               groq_model: Optional[str] = None,
-                               groq_total_tokens: Optional[int] = None,
-                               groq_prompt_tokens: Optional[int] = None,
-                               groq_completion_tokens: Optional[int] = None,
-                               ) -> Optional[AnalysisReport]:
+    def create_analysis_report(
+        self,
+        user_id: int,
+        transcript_id: int,
+        mistral_analysis_json: Optional[Any] = None,
+    ) -> Optional[AnalysisReport]:
         """
         Creates a new AI analysis report.
         Ensures the transcript belongs to the provided user_id.
@@ -332,56 +290,6 @@ class DataManager:
             new_report.user_id = user_id
             new_report.transcript_id = transcript_id
             new_report.mistral_analysis_json = mistral_analysis_json
-
-            new_report.chatgpt_summary = chatgpt_summary
-            new_report.chatgpt_concise_rationale = chatgpt_concise_rationale
-            new_report.chatgpt_overall_sentiment = chatgpt_overall_sentiment
-            new_report.chatgpt_sentiment_scores_by_segment = chatgpt_sentiment_scores_by_segment
-            new_report.chatgpt_management_confidence_score = chatgpt_management_confidence_score
-            new_report.chatgpt_evasiveness_score_q_a = chatgpt_evasiveness_score_q_a
-            new_report.chatgpt_key_topics_discussed = chatgpt_key_topics_discussed
-            new_report.chatgpt_red_flags_identified = chatgpt_red_flags_identified
-            new_report.chatgpt_raw_response_json = chatgpt_raw_response_json
-
-            new_report.chatgpt_request_ms = chatgpt_request_ms
-            new_report.chatgpt_model = chatgpt_model
-            new_report.chatgpt_temperature = chatgpt_temperature
-            new_report.chatgpt_max_tokens = chatgpt_max_tokens
-            new_report.chatgpt_total_tokens = chatgpt_total_tokens
-            new_report.chatgpt_prompt_tokens = chatgpt_prompt_tokens
-            new_report.chatgpt_completion_tokens = chatgpt_completion_tokens
-
-            new_report.gemini_summary = gemini_summary
-            new_report.gemini_concise_rationale = gemini_concise_rationale
-            new_report.gemini_overall_sentiment = gemini_overall_sentiment
-            new_report.gemini_sentiment_scores_by_segment = gemini_sentiment_scores_by_segment
-            new_report.gemini_management_confidence_score = gemini_management_confidence_score
-            new_report.gemini_evasiveness_score_q_a = gemini_evasiveness_score_q_a
-            new_report.gemini_key_topics_discussed = gemini_key_topics_discussed
-            new_report.gemini_red_flags_identified = gemini_red_flags_identified
-            new_report.gemini_raw_response_json = gemini_raw_response_json
-
-            new_report.gemini_request_ms = gemini_request_ms
-            new_report.gemini_model = gemini_model
-            new_report.gemini_prompt_tokens = gemini_prompt_tokens
-            new_report.gemini_thoughts_tokens = gemini_thoughts_tokens
-            new_report.gemini_candidates_tokens = gemini_candidates_tokens
-
-            new_report.groq_summary = groq_summary
-            new_report.groq_concise_rationale = groq_concise_rationale
-            new_report.groq_overall_sentiment = groq_overall_sentiment
-            new_report.groq_sentiment_scores_by_segment = groq_sentiment_scores_by_segment
-            new_report.groq_management_confidence_score = groq_management_confidence_score
-            new_report.groq_evasiveness_score_q_a = groq_evasiveness_score_q_a
-            new_report.groq_key_topics_discussed = groq_key_topics_discussed
-            new_report.groq_red_flags_identified = groq_red_flags_identified
-            new_report.groq_raw_response_json = groq_raw_response_json
-
-            new_report.groq_request_ms = groq_request_ms
-            new_report.groq_model = groq_model
-            new_report.groq_total_tokens = groq_total_tokens
-            new_report.groq_prompt_tokens = groq_prompt_tokens
-            new_report.groq_completion_tokens = groq_completion_tokens
 
             self.db.session.add(new_report)
             self.db.session.commit()

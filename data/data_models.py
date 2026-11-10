@@ -113,66 +113,6 @@ class AnalysisReport(db.Model):
         lazy=True
     )
 
-    # --- ChatGPT Analysis Fields ---
-    chatgpt_summary = db.Column(db.Text)
-    chatgpt_concise_rationale = db.Column(db.Text)
-    chatgpt_overall_sentiment = db.Column(db.String(50))
-    chatgpt_sentiment_scores_by_segment = db.Column(db.JSON)
-    chatgpt_management_confidence_score = db.Column(db.Float)
-    chatgpt_evasiveness_score_q_a = db.Column(db.Float)
-    chatgpt_key_topics_discussed = db.Column(db.JSON)
-    chatgpt_red_flags_identified = db.Column(db.JSON)
-    chatgpt_raw_response_json = db.Column(db.JSON)
-
-    # ChatGPT timing + token/metadata
-    chatgpt_request_ms = db.Column(db.Float)
-    chatgpt_model = db.Column(db.String(128))
-    chatgpt_temperature = db.Column(db.Float)
-    chatgpt_max_tokens = db.Column(db.Integer)
-    chatgpt_total_tokens = db.Column(db.Integer)
-    chatgpt_prompt_tokens = db.Column(db.Integer)
-    chatgpt_completion_tokens = db.Column(db.Integer)
-
-    # --- Gemini Analysis Fields ---
-    gemini_summary = db.Column(db.Text)
-    gemini_concise_rationale = db.Column(db.Text)
-    gemini_overall_sentiment = db.Column(db.String(50))
-    gemini_sentiment_scores_by_segment = db.Column(db.JSON)
-    gemini_management_confidence_score = db.Column(db.Float)
-    gemini_evasiveness_score_q_a = db.Column(db.Float)
-    gemini_key_topics_discussed = db.Column(db.JSON)
-    gemini_red_flags_identified = db.Column(db.JSON)
-    gemini_raw_response_json = db.Column(db.JSON)
-
-    # Gemini timing + token/metadata
-    gemini_request_ms = db.Column(db.Float)
-    gemini_model = db.Column(db.String(128))
-    gemini_temperature = db.Column(db.Float)
-    gemini_max_tokens = db.Column(db.Integer)
-    gemini_prompt_tokens = db.Column(db.Integer)
-    gemini_thoughts_tokens = db.Column(db.Integer)
-    gemini_candidates_tokens = db.Column(db.Integer)
-
-    # --- Groq Analysis Fields ---
-    groq_summary = db.Column(db.Text)
-    groq_concise_rationale = db.Column(db.Text)
-    groq_overall_sentiment = db.Column(db.String(50))
-    groq_sentiment_scores_by_segment = db.Column(db.JSON)
-    groq_management_confidence_score = db.Column(db.Float)
-    groq_evasiveness_score_q_a = db.Column(db.Float)
-    groq_key_topics_discussed = db.Column(db.JSON)
-    groq_red_flags_identified = db.Column(db.JSON)
-    groq_raw_response_json = db.Column(db.JSON)
-
-    # Groq timing + token/metadata
-    groq_request_ms = db.Column(db.Float)
-    groq_model = db.Column(db.String(128))
-    groq_temperature = db.Column(db.Float)
-    groq_max_tokens = db.Column(db.Integer)
-    groq_total_tokens = db.Column(db.Integer)
-    groq_prompt_tokens = db.Column(db.Integer)
-    groq_completion_tokens = db.Column(db.Integer)
-
     # enforce uniqueness: one analysis report per user/transcript/date
     __table_args__ = (UniqueConstraint('user_id', 'transcript_id', 'analysis_date',
                                        name='_user_transcript_date_uc'),)
