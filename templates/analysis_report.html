@@ -3,54 +3,62 @@
 {% block title %}Report - {{ report.transcript.company.company_name }}{% endblock title %}
 
 {% block content %}
-<div class="py-6 px-4 sm:px-6 lg:px-8">
-    <div class="relative mb-8 text-center">
-        <a href="{{ url_for('dashboard') }}" class="absolute left-0 top-1/2 -translate-y-1/2 flex items-center text-indigo-600 hover:text-indigo-800 transition duration-150">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+<div class="mx-auto max-w-7xl space-y-6 py-4 sm:py-8">
+    <div class="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <a href="{{ url_for('dashboard') }}" class="inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
             Back to Dashboard
         </a>
-        <h1 class="text-4xl font-extrabold text-gray-900">
-            Analysis Report
-        </h1>
+        <h1 class="text-center text-2xl font-bold tracking-tight text-slate-900 sm:absolute sm:left-1/2 sm:-translate-x-1/2 sm:text-3xl">Analysis report</h1>
     </div>
 
-    <div class="bg-white rounded-lg shadow-xl p-8 max-w-5xl mx-auto">
-        <div class="border-b border-gray-200 pb-4 mb-4 text-center">
-            {% if report.transcript.company.logo_url %}
-                <div class="flex justify-center mb-4">
-                    <img src="{{ report.transcript.company.logo_url }}" 
-                         alt="{{ report.transcript.company.company_name }} logo" 
-                         class="h-32 w-32 object-contain"
-                         onerror="this.style.display='none'">
-                </div>
-            {% endif %}
-            <h2 class="text-3xl font-bold text-indigo-700">
-                {{ report.transcript.company.company_name }} ({{ report.transcript.company.ticker_symbol }})
-            </h2>
-            <p class="text-xl text-gray-600">
-                Q{{ report.transcript.fiscal_quarter }} {{ report.transcript.fiscal_year }} Earnings Call
-            </p>
-            <p class="text-sm text-gray-500 mt-2">
-                Analyzed on: {{ report.analysis_date.strftime('%Y-%m-%d %H:%M') }}
+    <div class="mx-auto max-w-6xl rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8">
+        <div class="mb-6 flex flex-col gap-5 border-b border-slate-200 pb-6 sm:flex-row sm:items-center sm:justify-between">
+            {% set company = report.transcript.company %}
+            {% set company_logo_url = company.logo_url or '' %}
+            <div class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                {% if company_logo_url.startswith('http://') or company_logo_url.startswith('https://') %}
+                    <img src="{{ company_logo_url }}"
+                         alt="{{ company.company_name }} logo"
+                         class="max-h-full max-w-full object-contain"
+                         onerror="this.hidden=true; this.nextElementSibling.hidden=false">
+                    <span hidden class="flex h-full w-full items-center justify-center rounded-xl bg-indigo-50 text-2xl font-bold text-indigo-700">{{ company.company_name[:1]|upper }}</span>
+                {% else %}
+                    <span class="flex h-full w-full items-center justify-center rounded-xl bg-indigo-50 text-2xl font-bold text-indigo-700">{{ company.company_name[:1]|upper }}</span>
+                {% endif %}
+            </div>
+            <div class="min-w-0 flex-1 text-center sm:text-left">
+                <p class="text-sm font-semibold uppercase tracking-widest text-indigo-600">Earnings call analysis</p>
+                <h2 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                    {{ company.company_name }} <span class="text-indigo-700">({{ company.ticker_symbol }})</span>
+                </h2>
+                <p class="mt-1 text-base text-slate-600">Q{{ report.transcript.fiscal_quarter }} {{ report.transcript.fiscal_year }} earnings call</p>
+            </div>
+            <p class="shrink-0 rounded-xl bg-slate-50 px-4 py-3 text-center text-sm text-slate-600 sm:text-right">
+                <span class="block text-xs font-semibold uppercase tracking-wider text-slate-500">Analyzed</span>
+                <span class="mt-1 block font-medium text-slate-800">{{ report.analysis_date.strftime('%Y-%m-%d %H:%M') }}</span>
             </p>
         </div>
 
         <!-- AI Chatbot Section -->
-        <div class="mb-8 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg shadow-md p-6 border border-indigo-200">
-            <div class="flex items-center justify-between mb-4">
+        <div class="mb-8 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 to-slate-50 p-5 sm:p-6">
+            <div class="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div class="flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="mr-2 h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                     </svg>
-                    <h3 class="text-xl font-bold text-gray-900">AI Assistant - Ask Questions</h3>
+                    <div>
+                        <h3 class="text-lg font-semibold text-slate-900">Ask about this earnings call</h3>
+                        <p class="mt-0.5 text-sm text-slate-600">Explore details from the transcript and analysis.</p>
+                    </div>
                 </div>
-                <div class="flex gap-2">
+                <div class="flex flex-wrap gap-2">
                     <button 
                         id="downloadHistoryButton" 
                         onclick="downloadHistory()" 
-                        class="hidden px-3 py-2 text-sm font-medium text-indigo-700 bg-white border border-indigo-300 rounded-lg hover:bg-indigo-50 transition duration-150 flex items-center"
+                        class="hidden flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -60,7 +68,7 @@
                     <button 
                         id="clearChatButton" 
                         onclick="clearChat()" 
-                        class="hidden px-3 py-2 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-lg hover:bg-red-50 transition duration-150 flex items-center"
+                        class="hidden flex items-center rounded-lg border border-red-100 bg-white px-3 py-2 text-sm font-semibold text-red-600 transition hover:border-red-200 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -69,7 +77,7 @@
                     </button>
                     <button 
                         id="toggleChat" 
-                        class="px-3 py-2 text-sm font-medium text-indigo-700 bg-white border border-indigo-300 rounded-lg hover:bg-indigo-50 transition duration-150 flex items-center"
+                        class="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -82,8 +90,8 @@
             
             <div id="chatContainer" class="space-y-4 hidden">
                 <!-- Chat Messages Area -->
-                <div id="chatMessages" class="bg-white rounded-lg p-4 h-96 overflow-y-auto border border-gray-200 space-y-3">
-                    <div class="text-center text-gray-500 text-sm py-8">
+                <div id="chatMessages" class="h-96 space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4">
+                    <div class="py-8 text-center text-sm text-slate-500">
                         <p class="mb-2">👋 Hi! I'm your AI assistant for this earnings call.</p>
                         <p>Ask me anything about the transcript or analysis!</p>
                     </div>
@@ -95,12 +103,12 @@
                         type="text" 
                         id="chatInput" 
                         placeholder="Ask a question about this earnings call..." 
-                        class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        class="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
                     />
                     <button 
                         onclick="sendMessage()" 
                         id="sendButton"
-                        class="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-150 font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        class="rounded-lg bg-indigo-600 px-6 py-3 font-semibold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-400"
                     >
                         Send
                     </button>
@@ -108,14 +116,14 @@
 
                 <!-- Example Questions -->
                 <div class="flex flex-wrap gap-2">
-                    <span class="text-xs text-gray-600 font-medium">Quick questions:</span>
-                    <button onclick="askExample('What were the main revenue drivers?')" class="text-xs px-3 py-1 bg-white border border-indigo-300 text-indigo-700 rounded-full hover:bg-indigo-50 transition duration-150">
+                    <span class="text-xs font-medium text-slate-500">Quick questions:</span>
+                    <button onclick="askExample('What were the main revenue drivers?')" class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
                         Revenue drivers
                     </button>
-                    <button onclick="askExample('Any concerns mentioned by management?')" class="text-xs px-3 py-1 bg-white border border-indigo-300 text-indigo-700 rounded-full hover:bg-indigo-50 transition duration-150">
+                    <button onclick="askExample('Any concerns mentioned by management?')" class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
                         Management concerns
                     </button>
-                    <button onclick="askExample('What guidance was provided?')" class="text-xs px-3 py-1 bg-white border border-indigo-300 text-indigo-700 rounded-full hover:bg-indigo-50 transition duration-150">
+                    <button onclick="askExample('What guidance was provided?')" class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">
                         Future guidance
                     </button>
                 </div>
@@ -125,58 +133,61 @@
         {% set mistral = report.mistral_analysis_json or {} %}
         {% set analysis = mistral.get('structured_output', {}) %}
         {% set metrics = analysis.get('key_metrics', {}) %}
-        <div class="mb-6 flex items-center justify-between border-b border-gray-200 pb-4">
-            <h3 class="text-2xl font-bold text-gray-900">Mistral Analysis</h3>
+        <div class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+            <div>
+                <p class="text-sm font-semibold uppercase tracking-widest text-indigo-600">The findings</p>
+                <h3 class="mt-1 text-2xl font-bold tracking-tight text-slate-900">Mistral analysis</h3>
+            </div>
             <a href="{{ url_for('view_raw_analysis_json', report_id=report.report_id, ai_name='mistral') }}" target="_blank" rel="noopener"
-               class="text-sm text-indigo-600 hover:text-indigo-800 transition duration-150">View Raw JSON</a>
+               class="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">View raw JSON</a>
         </div>
 
         {% if not report.mistral_analysis_json %}
-            <div class="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+            <div class="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                 This report has no Mistral analysis. It may have been created before Mistral analysis was enabled.
             </div>
         {% endif %}
 
         <div class="space-y-6 text-sm">
-            <section class="rounded-xl border border-gray-200 bg-gray-50 p-5 sm:p-6">
-                <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Summary</h4>
-                <p class="leading-relaxed text-gray-800">{{ analysis.get('summary', 'No summary provided.') }}</p>
+            <section class="rounded-2xl border border-slate-200 bg-slate-50 p-5 sm:p-6">
+                <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Summary</h4>
+                <p class="leading-relaxed text-slate-800">{{ analysis.get('summary', 'No summary provided.') }}</p>
             </section>
 
-            <section class="rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
-                <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Concise Rationale</h4>
-                <p class="leading-relaxed text-gray-700">{{ analysis.get('concise_rationale') or 'Mistral did not provide a rationale for this report.' }}</p>
+            <section class="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+                <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Concise rationale</h4>
+                <p class="leading-relaxed text-slate-700">{{ analysis.get('concise_rationale') or 'Mistral did not provide a rationale for this report.' }}</p>
             </section>
 
-            <section aria-labelledby="key-metrics-heading" class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 sm:p-5">
+            <section aria-labelledby="key-metrics-heading" class="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4 sm:p-5">
                 <h4 id="key-metrics-heading" class="mb-4 text-sm font-semibold uppercase tracking-wider text-indigo-900">Key Metrics</h4>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-indigo-100">
-                    <div class="rounded-lg border border-gray-200 border-l-4 border-l-indigo-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-indigo-400 sm:shadow-none sm:px-5">
-                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Sentiment</p>
+                    <div class="rounded-xl border border-slate-200 border-l-4 border-l-indigo-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-indigo-400 sm:shadow-none sm:px-5">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Sentiment</p>
                         <p class="mt-2">
                             <span class="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold
-                                {{ 'bg-green-100 text-green-800' if analysis.get('overall_sentiment') == 'Positive' else ('bg-red-100 text-red-800' if analysis.get('overall_sentiment') == 'Negative' else 'bg-gray-100 text-gray-700') }}">
+                                {{ 'bg-green-100 text-green-800' if analysis.get('overall_sentiment') == 'Positive' else ('bg-red-100 text-red-800' if analysis.get('overall_sentiment') == 'Negative' else 'bg-slate-100 text-slate-700') }}">
                                 {{ analysis.get('overall_sentiment', 'N/A') }}
                             </span>
                         </p>
                     </div>
-                    <div class="rounded-lg border border-gray-200 border-l-4 border-l-blue-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-blue-400 sm:shadow-none sm:px-5">
-                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Management Confidence</p>
-                        <p class="mt-2 text-2xl font-bold leading-tight text-gray-900">{{ metrics.get('management_confidence_score', 'N/A') }}</p>
+                    <div class="rounded-xl border border-slate-200 border-l-4 border-l-blue-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-blue-400 sm:shadow-none sm:px-5">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Management confidence</p>
+                        <p class="mt-2 text-2xl font-bold leading-tight text-slate-900">{{ metrics.get('management_confidence_score', 'N/A') }}</p>
                     </div>
-                    <div class="rounded-lg border border-gray-200 border-l-4 border-l-amber-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-amber-400 sm:shadow-none sm:px-5">
-                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Q&amp;A Evasiveness</p>
-                        <p class="mt-2 text-2xl font-bold leading-tight text-gray-900">{{ metrics.get('evasiveness_score_q_a', 'N/A') }}</p>
+                    <div class="rounded-xl border border-slate-200 border-l-4 border-l-amber-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-amber-400 sm:shadow-none sm:px-5">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Q&amp;A evasiveness</p>
+                        <p class="mt-2 text-2xl font-bold leading-tight text-slate-900">{{ metrics.get('evasiveness_score_q_a', 'N/A') }}</p>
                     </div>
                 </div>
             </section>
 
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <section class="rounded-xl border border-gray-200 bg-white p-5">
-                    <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Key Topics</h4>
+                <section class="rounded-2xl border border-slate-200 bg-white p-5">
+                    <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Key topics</h4>
                     {% set key_topics = analysis.get('key_topics') or [] %}
                     {% if key_topics %}
-                        <ul class="space-y-2 text-gray-700">
+                        <ul class="space-y-2 text-slate-700">
                             {% for topic in key_topics %}
                                 <li class="flex items-start gap-2">
                                     <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"></span>
@@ -185,10 +196,10 @@
                             {% endfor %}
                         </ul>
                     {% else %}
-                        <p class="text-gray-500">N/A</p>
+                        <p class="text-slate-500">N/A</p>
                     {% endif %}
                 </section>
-                <section class="rounded-xl border border-red-100 bg-red-50/50 p-5">
+                <section class="rounded-2xl border border-red-100 bg-red-50/50 p-5">
                     <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-red-700">Red Flags</h4>
                     {% set red_flags = analysis.get('red_flags') or [] %}
                     {% if red_flags %}
@@ -201,25 +212,28 @@
                             {% endfor %}
                         </ul>
                     {% else %}
-                        <p class="text-gray-500">N/A</p>
+                        <p class="text-slate-500">N/A</p>
                     {% endif %}
                 </section>
             </div>
 
-            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                <h4 class="text-xs font-semibold uppercase tracking-wider text-gray-500">Request Time</h4>
-                <p class="font-medium text-gray-700">{{ (mistral.get('request_time_ms') | round(1) ~ ' ms') if mistral.get('request_time_ms') is not none else 'N/A' }}</p>
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Request time</h4>
+                <p class="font-medium text-slate-700">{{ (mistral.get('request_time_ms') | round(1) ~ ' ms') if mistral.get('request_time_ms') is not none else 'N/A' }}</p>
             </div>
         </div>
 
-        <div class="mt-8 pt-4 border-t border-gray-200">
-            <p class="font-bold text-lg text-gray-900 mb-2">Raw Transcript</p>
+        <div class="mt-8 border-t border-slate-200 pt-6">
+            <div class="mb-3">
+                <h3 class="text-lg font-semibold text-slate-900">Raw transcript</h3>
+                <p class="mt-1 text-sm text-slate-500">Source text for this earnings call analysis.</p>
+            </div>
             {% if report.transcript.transcript_raw %}
-                <div class="bg-gray-100 p-4 rounded-md overflow-y-auto max-h-96 text-gray-800 text-sm">
+                <div class="max-h-96 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                     <pre class="whitespace-pre-wrap break-words m-0 font-sans">{{ report.transcript.transcript_raw | trim }}</pre>
                 </div>
             {% else %}
-                <div class="bg-gray-100 p-4 rounded-md text-gray-600 text-sm text-center">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-600">
                     <p>No transcript text available.</p>
                 </div>
             {% endif %}

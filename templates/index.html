@@ -1,76 +1,147 @@
 {% extends "base.html" %}
 
-{% block title %}Welcome to My EBITA{% endblock title %}
+{% block title %}My EBITA | Earnings call analysis, made clearer{% endblock title %}
 
 {% block content %}
-<div class="flex flex-col items-center justify-center text-center py-16 px-4 sm:px-6 lg:px-8">
-    <h1 class="text-6xl font-extrabold text-gray-900 mb-6 tracking-tight">
-        Your AI Financial Sidekick
-    </h1>
-    <p class="mt-4 text-2xl text-gray-600 max-w-3xl font-light">
-        Ever feel like earnings calls are just corporate poetry?<br>
-        <b class="font-bold text-indigo-600">My EBITA</b> — <b>E</b>arnings <b>B</b>eat <b>I</b>ndicator & <b>T</b>ext <b>A</b>nalyzer — cuts through the jargon to reveal the real story behind the numbers.
-    </p>
+<div class="mx-auto max-w-7xl">
+    <section class="relative isolate overflow-hidden rounded-3xl bg-slate-950 px-6 py-16 shadow-xl sm:px-10 sm:py-20 lg:px-16">
+        <div aria-hidden="true" class="absolute inset-0 -z-10 overflow-hidden">
+            <div class="absolute -right-20 -top-32 h-96 w-96 rounded-full bg-indigo-500/25 blur-3xl"></div>
+            <div class="absolute -bottom-48 left-1/4 h-96 w-96 rounded-full bg-cyan-500/15 blur-3xl"></div>
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.08)_1px,transparent_0)] [background-size:28px_28px]"></div>
+        </div>
 
-    <div class="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-        {% if current_user.is_authenticated %}
-            <a href="{{ url_for('dashboard') }}" class="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 transform hover:scale-105 transition duration-300 ease-in-out">
-                Go to Dashboard
-            </a>
-        {% else %}
-            <a href="{{ url_for('login') }}" class="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 transform hover:scale-105 transition duration-300 ease-in-out">
-                Login Now
-            </a>
-            <a href="{{ url_for('register') }}" class="w-full sm:w-auto px-8 py-4 border-2 border-indigo-600 text-indigo-600 font-semibold rounded-full shadow-lg hover:bg-indigo-50 hover:text-indigo-700 transform hover:scale-105 transition duration-300 ease-in-out">
-                Register for Free
-            </a>
-        {% endif %}
-    </div>
-
-    <div class="mt-20 w-full max-w-7xl">
-        <h2 class="text-4xl font-bold text-gray-900 mb-12 text-center">What can My EBITA do for you?</h2>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <div class="bg-white rounded-xl shadow-lg p-8 flex flex-col items-center text-center transform transition duration-300 hover:scale-105">
-                <div class="bg-indigo-100 text-indigo-600 p-3 rounded-full mb-6">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-4m0 0a3 3 0 10-6 0m6 0a3 3 0 116 0m0 0H22m-10 0a3 3 0 10-6 0m6 0a3 3 0 116 0m0 0V3m-10 0a3 3 0 10-6 0m6 0a3 3 0 116 0m0 0H22m-10 0a3 3 0 10-6 0m6 0a3 3 0 116 0m0 0V3" />
-                    </svg>
-                </div>
-                <h3 class="text-2xl font-bold text-gray-900 mb-3">Automated Transcript Analysis</h3>
-                <p class="text-lg text-gray-700">Get concise summaries, sentiment scores, and key topic extraction from lengthy earnings calls instantly.</p>
+        <div class="mx-auto max-w-4xl text-center">
+            <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-indigo-100">
+                <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+                Earnings calls, with more signal and less noise
             </div>
-
-            <div class="bg-white rounded-xl shadow-lg p-8 flex flex-col items-center text-center transform transition duration-300 hover:scale-105">
-                <div class="bg-blue-100 text-blue-600 p-3 rounded-full mb-6">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.5l-6 6M12 6.5l6 6M12 17.5v-11M6 12.5h12M12 17.5l-6-6M12 17.5l6-6" />
-                    </svg>
-                </div>
-                <h3 class="text-2xl font-bold text-gray-900 mb-3">"Between-the-Lines" Insights</h3>
-                <p class="text-lg text-gray-700">Our AI identifies corporate jargon, evasive language, and gives you a clear score for management's true confidence.</p>
+            <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl">
+                Understand the story
+                <span class="block bg-gradient-to-r from-indigo-300 to-cyan-300 bg-clip-text text-transparent">behind the numbers.</span>
+            </h1>
+            <p class="mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-300 sm:text-xl">
+                Long earnings calls can hide the details that matter. My EBITA turns a transcript into a clear summary, key signals, and a conversation you can explore.
+            </p>
+            <p class="mt-4 text-sm font-medium tracking-wide text-indigo-200">
+                EBITA stands for <span class="text-white">Earnings Beat Indicator &amp; Text Analyzer</span>.
+            </p>
+            <div class="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
+                {% if current_user.is_authenticated %}
+                    <a href="{{ url_for('dashboard') }}" class="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-500 px-6 py-3.5 font-semibold text-white shadow-lg shadow-indigo-950/30 transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:ring-offset-2 focus:ring-offset-slate-950">
+                        Open your dashboard
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-7-7 7 7-7 7" />
+                        </svg>
+                    </a>
+                {% else %}
+                    <a href="{{ url_for('register') }}" class="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-500 px-6 py-3.5 font-semibold text-white shadow-lg shadow-indigo-950/30 transition hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:ring-offset-2 focus:ring-offset-slate-950">
+                        Get started
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-7-7 7 7-7 7" />
+                        </svg>
+                    </a>
+                    <a href="{{ url_for('login') }}" class="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/5 px-6 py-3.5 font-semibold text-white transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/70 focus:ring-offset-2 focus:ring-offset-slate-950">
+                        Sign in
+                    </a>
+                {% endif %}
             </div>
+            <p class="mt-5 text-sm text-slate-400">Built for exploring earnings calls—not a substitute for your own research.</p>
+        </div>
 
-            <div class="bg-white rounded-xl shadow-lg p-8 flex flex-col items-center text-center transform transition duration-300 hover:scale-105">
-                <div class="bg-green-100 text-green-600 p-3 rounded-full mb-6">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 12.5l4-4 4 4M12 6v12M12 6h12M12 6H0" />
-                    </svg>
+        <div aria-hidden="true" class="mx-auto mt-14 hidden max-w-3xl rounded-2xl border border-white/15 bg-white/[0.07] p-5 text-left shadow-2xl backdrop-blur sm:block">
+            <div class="flex items-center justify-between border-b border-white/10 pb-4">
+                <div>
+                    <p class="text-sm font-semibold text-white">Earnings call snapshot</p>
+                    <p class="mt-1 text-xs text-slate-400">A clearer starting point for your research</p>
                 </div>
-                <h3 class="text-2xl font-bold text-gray-900 mb-3">AI Comparison</h3>
-                <p class="text-lg text-gray-700">See how Google Gemini and OpenAI's ChatGPT analyze the same transcript side-by-side for a balanced perspective.</p>
+                <span class="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300">Analysis ready</span>
             </div>
-
-            <div class="bg-white rounded-xl shadow-lg p-8 flex flex-col items-center text-center transform transition duration-300 hover:scale-105 col-span-1 md:col-span-2 lg:col-span-3">
-                <div class="bg-yellow-100 text-yellow-600 p-3 rounded-full mb-6">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path d="M12 14v4M12 14v-4M12 14a3 3 0 100-6M12 14a3 3 0 100-6M12 14a3 3 0 100-6" />
-                    </svg>
+            <div class="grid grid-cols-3 divide-x divide-white/10 pt-4 text-center">
+                <div class="px-3">
+                    <p class="text-xs uppercase tracking-wider text-slate-400">Summary</p>
+                    <p class="mt-2 text-sm font-medium text-white">The key takeaways</p>
                 </div>
-                <h3 class="text-2xl font-bold text-gray-900 mb-3">Become a Smarter Investor</h3>
-                <p class="text-lg text-gray-700 max-w-2xl">My EBITA is more than just a tool; it’s a learning experience. Understand the nuances of financial communication and the power of AI in dissecting it, making you a more informed decision-maker.</p>
+                <div class="px-3">
+                    <p class="text-xs uppercase tracking-wider text-slate-400">Signals</p>
+                    <p class="mt-2 text-sm font-medium text-white">Topics &amp; red flags</p>
+                </div>
+                <div class="px-3">
+                    <p class="text-xs uppercase tracking-wider text-slate-400">Follow-up</p>
+                    <p class="mt-2 text-sm font-medium text-white">Ask about the call</p>
+                </div>
             </div>
         </div>
-    </div>
+    </section>
+
+    <section class="py-16 sm:py-20">
+        <div class="mx-auto max-w-2xl text-center">
+            <p class="text-sm font-semibold uppercase tracking-widest text-indigo-600">A practical research companion</p>
+            <h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Make every call easier to navigate</h2>
+            <p class="mt-4 text-lg leading-7 text-slate-600">Get oriented quickly, then dig deeper into the details that matter to you.</p>
+        </div>
+
+        <div class="mt-10 grid grid-cols-1 gap-5 md:grid-cols-3">
+            <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                    </svg>
+                </div>
+                <h3 class="mt-5 text-lg font-semibold text-slate-900">A concise overview</h3>
+                <p class="mt-2 leading-7 text-slate-600">Get a structured summary and rationale, so you can get the gist before reading every line.</p>
+            </article>
+
+            <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700">
+                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-5l-5 5v-5Z" />
+                    </svg>
+                </div>
+                <h3 class="mt-5 text-lg font-semibold text-slate-900">Ask follow-up questions</h3>
+                <p class="mt-2 leading-7 text-slate-600">Explore the transcript conversationally and follow up on management’s comments and answers.</p>
+            </article>
+
+            <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2m6.36.64-1.42 1.42M21 12h-2M5 12H3m3.05-5.95L4.64 4.64M12 8a4 4 0 0 0-2.4 7.2c.25.19.4.49.4.8V17h4v-1c0-.31.15-.61.4-.8A4 4 0 0 0 12 8Zm-2 12h4" />
+                    </svg>
+                </div>
+                <h3 class="mt-5 text-lg font-semibold text-slate-900">Spot useful signals</h3>
+                <p class="mt-2 leading-7 text-slate-600">Review sentiment, management confidence, Q&amp;A evasiveness, key topics, and potential red flags.</p>
+            </article>
+        </div>
+    </section>
+
+    <section class="mb-10 rounded-2xl border border-slate-200 bg-white px-6 py-10 shadow-sm sm:px-10">
+        <div class="text-center">
+            <p class="text-sm font-semibold uppercase tracking-widest text-indigo-600">How it works</p>
+            <h2 class="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">From ticker to takeaways in three steps</h2>
+        </div>
+        <ol class="mx-auto mt-8 grid max-w-5xl grid-cols-1 gap-6 sm:grid-cols-3">
+            <li class="flex gap-4">
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">1</span>
+                <div>
+                    <h3 class="font-semibold text-slate-900">Choose a call</h3>
+                    <p class="mt-1 text-sm leading-6 text-slate-600">Select a company ticker and fiscal quarter.</p>
+                </div>
+            </li>
+            <li class="flex gap-4">
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">2</span>
+                <div>
+                    <h3 class="font-semibold text-slate-900">Review the analysis</h3>
+                    <p class="mt-1 text-sm leading-6 text-slate-600">See an AI-generated summary and structured signals.</p>
+                </div>
+            </li>
+            <li class="flex gap-4">
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">3</span>
+                <div>
+                    <h3 class="font-semibold text-slate-900">Explore the transcript</h3>
+                    <p class="mt-1 text-sm leading-6 text-slate-600">Ask questions and inspect the source conversation.</p>
+                </div>
+            </li>
+        </ol>
+    </section>
 </div>
 {% endblock content %}

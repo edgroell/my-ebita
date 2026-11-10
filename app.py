@@ -322,7 +322,7 @@ def logout():
 
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
-@limiter.limit("10 per hour")
+@limiter.limit("10 per hour", methods=["POST"])
 def profile():
     """User profile page for updating account information"""
     if request.method == 'POST':
@@ -460,7 +460,7 @@ def acquire_transcript():
         # Check/create company
         company = data_manager.get_company_by_ticker(ticker)
         company_profile = None
-        if not company or not company.logo_url:
+        if not company or not AlphaVantageService.is_valid_logo_url(company.logo_url):
             try:
                 company_profile = alphavantage_service.get_company_profile_basic(ticker)
             except Exception as error:
@@ -483,8 +483,7 @@ def acquire_transcript():
         elif company_profile:
             if company.company_name == ticker and company_profile.get('name'):
                 company.company_name = company_profile['name']
-            if not company.logo_url:
-                company.logo_url = company_profile.get('logo_url') or None
+            company.logo_url = company_profile.get('logo_url') or None
             try:
                 db.session.commit()
             except Exception as error:
@@ -719,6 +718,36 @@ def view_analysis_report(report_id):
         flash("Unauthorized", 'danger')
         return redirect(url_for('dashboard'))
     
+    company = report.transcript.company
+    if company and alphavantage_service and (
+        company.logo_url is None
+        or (
+            company.logo_url
+            and not AlphaVantageService.is_valid_logo_url(company.logo_url)
+        )
+    ):
+        try:
+            company_profile = alphavantage_service.get_company_profile_basic(
+                company.ticker_symbol
+            )
+        except Exception as error:
+            app.logger.warning(
+                f"Could not refresh company logo for {company.ticker_symbol}: {error}"
+            )
+            company.logo_url = ""
+        else:
+            company.logo_url = (
+                company_profile.get('logo_url') if company_profile else ""
+            )
+
+        try:
+            db.session.commit()
+        except Exception as error:
+            db.session.rollback()
+            app.logger.warning(
+                f"Could not save company logo for {company.ticker_symbol}: {error}"
+            )
+
     return render_template('analysis_report.html', report=report)
 
 @app.route('/api/v1/reports/<int:report_id>/raw/<ai_name>')
@@ -1014,8 +1043,7 @@ def ratelimit_handler(e):
     app.logger.warning(f"Rate limit exceeded: {request.path} by {get_remote_address()}")
     if request.path.startswith('/api/'):
         return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
-    flash("Too many requests. Please slow down.", 'warning')
-    return redirect(url_for('dashboard'))
+    return render_template('429.html'), 429
 
 # -----------------------------------------------------
 # Automatic cleanup of inactive bot sessions

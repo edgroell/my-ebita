@@ -19,7 +19,7 @@
             <div class="space-x-4">
                 <a href="{{ url_for('index') }}" class="text-gray-600 hover:text-indigo-700 font-medium">Home</a>
                 {% if current_user.is_authenticated %}
-                    <a href="{{ url_for('profile') }}" class="text-gray-600 hover:text-indigo-700 font-medium">Profile</a>
+                    <a href="{{ url_for('profile') }}" class="text-gray-600 hover:text-indigo-700 font-medium">Account</a>
                     <a href="{{ url_for('dashboard') }}" class="text-gray-600 hover:text-indigo-700 font-medium">Dashboard</a>
                     <a href="{{ url_for('logout') }}" class="px-4 py-2 bg-red-500 text-white rounded-lg shadow-md hover:bg-red-600 transition duration-300">Logout</a>
                 {% else %}
@@ -52,15 +52,16 @@
         {% block content %}{% endblock content %}
     </main>
 
-    <footer class="bg-gray-800 text-white p-6 text-center mt-auto">
-        <div class="container mx-auto">
-            <div class="flex flex-col items-center space-y-3">
-                <div class="text-sm">
-                    &copy; {{ datetime.now().year }} My EBITA by Ed Groell. All rights reserved.
+    <footer class="mt-auto border-t border-slate-700 bg-slate-900 text-slate-300">
+        <div class="container mx-auto px-6">
+            <div class="flex flex-col items-center justify-between gap-5 py-3 sm:flex-row">
+                <div class="text-center sm:text-left">
+                    <a href="{{ url_for('index') }}" class="text-lg font-bold tracking-tight text-white transition hover:text-indigo-200">My EBITA</a>
+                    <p class="mt-1 text-sm text-slate-400">&copy; {{ datetime.now().year }} Ed Groell. All rights reserved.</p>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <a href="/api/docs" target="_blank" class="inline-flex items-center text-indigo-300 hover:text-indigo-100 text-sm font-medium transition duration-150">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div>
+                    <a href="/api/docs" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/70 px-4 py-2.5 text-sm font-medium text-indigo-200 transition hover:border-indigo-400/50 hover:bg-slate-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 focus:ring-offset-slate-900">
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         API Documentation
