@@ -138,47 +138,77 @@
         {% endif %}
 
         <div class="space-y-6 text-sm">
-            <div>
-                <p class="font-bold text-lg text-gray-900 mb-2">Summary</p>
-                <p class="text-gray-700">{{ analysis.get('summary', 'No summary provided.') }}</p>
+            <section class="rounded-xl border border-gray-200 bg-gray-50 p-5 sm:p-6">
+                <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Summary</h4>
+                <p class="leading-relaxed text-gray-800">{{ analysis.get('summary', 'No summary provided.') }}</p>
+            </section>
+
+            <section class="rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
+                <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Concise Rationale</h4>
+                <p class="leading-relaxed text-gray-700">{{ analysis.get('concise_rationale') or 'Mistral did not provide a rationale for this report.' }}</p>
+            </section>
+
+            <section aria-labelledby="key-metrics-heading" class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 sm:p-5">
+                <h4 id="key-metrics-heading" class="mb-4 text-sm font-semibold uppercase tracking-wider text-indigo-900">Key Metrics</h4>
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-indigo-100">
+                    <div class="rounded-lg border border-gray-200 border-l-4 border-l-indigo-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-indigo-400 sm:shadow-none sm:px-5">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Sentiment</p>
+                        <p class="mt-2">
+                            <span class="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold
+                                {{ 'bg-green-100 text-green-800' if analysis.get('overall_sentiment') == 'Positive' else ('bg-red-100 text-red-800' if analysis.get('overall_sentiment') == 'Negative' else 'bg-gray-100 text-gray-700') }}">
+                                {{ analysis.get('overall_sentiment', 'N/A') }}
+                            </span>
+                        </p>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 border-l-4 border-l-blue-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-blue-400 sm:shadow-none sm:px-5">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Management Confidence</p>
+                        <p class="mt-2 text-2xl font-bold leading-tight text-gray-900">{{ metrics.get('management_confidence_score', 'N/A') }}</p>
+                    </div>
+                    <div class="rounded-lg border border-gray-200 border-l-4 border-l-amber-400 bg-white p-4 shadow-sm sm:rounded-none sm:border-0 sm:border-l-4 sm:border-l-amber-400 sm:shadow-none sm:px-5">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Q&amp;A Evasiveness</p>
+                        <p class="mt-2 text-2xl font-bold leading-tight text-gray-900">{{ metrics.get('evasiveness_score_q_a', 'N/A') }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <section class="rounded-xl border border-gray-200 bg-white p-5">
+                    <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Key Topics</h4>
+                    {% set key_topics = analysis.get('key_topics') or [] %}
+                    {% if key_topics %}
+                        <ul class="space-y-2 text-gray-700">
+                            {% for topic in key_topics %}
+                                <li class="flex items-start gap-2">
+                                    <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500"></span>
+                                    <span>{{ topic }}</span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-gray-500">N/A</p>
+                    {% endif %}
+                </section>
+                <section class="rounded-xl border border-red-100 bg-red-50/50 p-5">
+                    <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-red-700">Red Flags</h4>
+                    {% set red_flags = analysis.get('red_flags') or [] %}
+                    {% if red_flags %}
+                        <ul class="space-y-2 text-red-800">
+                            {% for flag in red_flags %}
+                                <li class="flex items-start gap-2">
+                                    <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"></span>
+                                    <span>{{ flag }}</span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-gray-500">N/A</p>
+                    {% endif %}
+                </section>
             </div>
 
-            <div>
-                <p class="font-bold text-lg text-gray-900 mb-2">Concise Rationale</p>
-                <p class="text-gray-700">{{ analysis.get('concise_rationale') or 'Mistral did not provide a rationale for this report.' }}</p>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                <div>
-                    <p class="font-bold text-lg text-gray-900 mb-2">Sentiment</p>
-                    <p class="font-semibold {{ 'text-green-600' if analysis.get('overall_sentiment') == 'Positive' else ('text-red-600' if analysis.get('overall_sentiment') == 'Negative' else 'text-gray-600') }}">
-                        {{ analysis.get('overall_sentiment', 'N/A') }}
-                    </p>
-                </div>
-                <div>
-                    <p class="font-bold text-lg text-gray-900 mb-2">Confidence</p>
-                    <p class="text-gray-600">{{ metrics.get('management_confidence_score', 'N/A') }}</p>
-                </div>
-                <div>
-                    <p class="font-bold text-lg text-gray-900 mb-2">Evasiveness</p>
-                    <p class="text-gray-600">{{ metrics.get('evasiveness_score_q_a', 'N/A') }}</p>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                    <p class="font-bold text-lg text-gray-900 mb-2">Key Topics</p>
-                    <p class="text-gray-600">{{ (analysis.get('key_topics') or []) | join(', ') or 'N/A' }}</p>
-                </div>
-                <div>
-                    <p class="font-bold text-lg text-red-500 mb-2">Red Flags</p>
-                    <p class="text-red-500">{{ (analysis.get('red_flags') or []) | join(', ') or 'N/A' }}</p>
-                </div>
-            </div>
-
-            <div>
-                <p class="font-bold text-lg text-gray-900 mb-2">Timings (ms)</p>
-                <p class="text-gray-600">Request: {{ (mistral.get('request_time_ms') | round(1) ~ ' ms') if mistral.get('request_time_ms') is not none else 'N/A' }}</p>
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <h4 class="text-xs font-semibold uppercase tracking-wider text-gray-500">Request Time</h4>
+                <p class="font-medium text-gray-700">{{ (mistral.get('request_time_ms') | round(1) ~ ' ms') if mistral.get('request_time_ms') is not none else 'N/A' }}</p>
             </div>
         </div>
 
