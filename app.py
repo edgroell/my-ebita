@@ -31,21 +31,12 @@ from services_ai.agentic_bot import AgenticBot
 
 # Import API services
 from services_api.alphavantage_service import AlphaVantageService
-from services_api.ninjas_service import NinjasService
-from services_api.chatgpt_service import ChatGPTService
-from services_api.gemini_service import GeminiService
-from services_api.groq_service import GroqService
 from services_api.mistral_service import MistralService
 
 from dotenv import load_dotenv
 
 # --- Load environment variables ---
 load_dotenv()
-
-# Default model configurations
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-DEFAULT_CHATGPT_MODEL = "gpt-4o-mini"
-DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
@@ -113,36 +104,23 @@ limiter = Limiter(
 data_manager = DataManager(db)
 
 # Initialize API Services
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-API_NINJAS_KEY = os.environ.get("API_NINJAS_KEY")
 ALPHA_VANTAGE_API_KEY = os.environ.get("ALPHA_VANTAGE_API_KEY")
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
-# Create ChatGPT service first (used by both RAG and analysis)
-chatgpt_service = ChatGPTService(api_key=OPENAI_API_KEY, model_name=DEFAULT_CHATGPT_MODEL) if OPENAI_API_KEY else None
-
 # Initialize other services
-ninjas_service = NinjasService(api_key=API_NINJAS_KEY) if API_NINJAS_KEY else None
 alphavantage_service = (
     AlphaVantageService(api_key=ALPHA_VANTAGE_API_KEY)
     if ALPHA_VANTAGE_API_KEY
     else None
 )
-gemini_service = GeminiService(api_key=GEMINI_API_KEY, model_name=DEFAULT_GEMINI_MODEL) if GEMINI_API_KEY else None
-groq_service = GroqService(api_key=GROQ_API_KEY, model_name=DEFAULT_GROQ_MODEL) if GROQ_API_KEY else None
 mistral_service = MistralService(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
-# Initialize Vector Store and RAG Manager (reusing chatgpt_service)
+# Initialize Vector Store and RAG Manager
 vector_store = None
 rag_manager = None
 try:
     vector_store = ChromaVectorStore(api_key=MISTRAL_API_KEY)
-    rag_manager = RAGManager(
-        vector_store=vector_store,
-        chatgpt_service=chatgpt_service
-    )
+    rag_manager = RAGManager(vector_store=vector_store)
     app.logger.info("RAG Manager initialized successfully")
 except Exception as e:
     app.logger.error(f"Failed to initialize RAG Manager: {e}")
@@ -217,11 +195,7 @@ def status():
         "status": "ok",
         "message": "EBITA API is operational",
         "services": {
-            "ninjas": ninjas_service is not None,
             "alphavantage": alphavantage_service is not None,
-            "chatgpt": chatgpt_service is not None,
-            "gemini": gemini_service is not None,
-            "groq": groq_service is not None,
             "mistral": mistral_service is not None,
             "rag": rag_manager is not None
         },
@@ -485,30 +459,39 @@ def acquire_transcript():
     try:
         # Check/create company
         company = data_manager.get_company_by_ticker(ticker)
-        if not company:
-            app.logger.info(f"Fetching company profile for {ticker}")
-            company_profile = (
-                ninjas_service.get_company_profile_basic(ticker)
-                if ninjas_service
-                else None
-            )
-            if company_profile:
-                company = data_manager.add_company(
-                    ticker_symbol=company_profile.get('symbol') or "",
-                    company_name=company_profile.get('name') or "",
-                    logo_url=company_profile.get('logo_url')
+        company_profile = None
+        if not company or not company.logo_url:
+            try:
+                company_profile = alphavantage_service.get_company_profile_basic(ticker)
+            except Exception as error:
+                app.logger.warning(
+                    f"Could not fetch Alpha Vantage company profile for {ticker}: {error}"
                 )
+
+        if not company:
+            company = data_manager.add_company(
+                ticker_symbol=(company_profile or {}).get('symbol') or ticker,
+                company_name=(company_profile or {}).get('name') or ticker,
+                logo_url=(company_profile or {}).get('logo_url') or None,
+            )
+            if company:
                 app.logger.info(f"Company created: {ticker}")
             else:
-                company = data_manager.add_company(
-                    ticker_symbol=ticker,
-                    company_name=ticker,
-                )
-                app.logger.info(f"Created company record using ticker only: {ticker}")
-            if not company:
                 app.logger.error(f"Failed to create company record for {ticker}")
                 flash(f"Failed to create company record for {ticker}.", 'danger')
                 return redirect(url_for('dashboard'))
+        elif company_profile:
+            if company.company_name == ticker and company_profile.get('name'):
+                company.company_name = company_profile['name']
+            if not company.logo_url:
+                company.logo_url = company_profile.get('logo_url') or None
+            try:
+                db.session.commit()
+            except Exception as error:
+                db.session.rollback()
+                app.logger.warning(
+                    f"Could not update Alpha Vantage company profile for {ticker}: {error}"
+                )
         
         # Check if transcript exists
         if year is None or quarter is None:
@@ -853,8 +836,7 @@ def _get_or_create_bot(transcript_id: int) -> AgenticBot:
             rag_manager=rag_manager,
             transcript_id=transcript_id,
             mistral_service=mistral_service,
-            google_api_key=os.environ.get("GOOGLE_API_KEY"),
-            google_cse_id=os.environ.get("GOOGLE_CSE_ID"),
+            staan_api_key=os.environ.get("STAAN_API_KEY"),
             user_id=str(current_user.user_id) if current_user.is_authenticated else None
         )
         

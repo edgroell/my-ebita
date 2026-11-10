@@ -13,7 +13,7 @@ To install this app, simply clone the repository and install the dependencies in
 ```bash
    pip install -r requirements.txt
 ```
-You'll also need to configure your API keys for the AI models and the data acquisition service in a .env file. Set `MISTRAL_API_KEY` to enable Mistral analysis, chatbot responses, and transcript embeddings for RAG indexing and retrieval.
+You'll also need to configure your API keys for the AI models and data acquisition service in a `.env` file. Set `MISTRAL_API_KEY` to enable Mistral analysis, chatbot responses, and transcript embeddings for RAG indexing and retrieval. Set `STAAN_API_KEY` (available from [staan.ai](https://staan.ai)) to enable current web search in the chatbot; without it, the chatbot only searches the earnings-call transcript.
 
 ## Usage
 
@@ -26,7 +26,7 @@ To use this app, run the following command `python app.py`
 > - The core of the app is the Dashboard, where you can acquire new earnings call transcripts and run your analysis.
 
 Acquiring a Transcript
-> - On the dashboard, enter a Ticker Symbol, Fiscal Year, and Fiscal Quarter. The app will fetch the transcript from the API Ninjas service.
+> - On the dashboard, enter a Ticker Symbol, Fiscal Year, and Fiscal Quarter. The app fetches the transcript, company name, and logo from Alpha Vantage.
 > - If a transcript already exists, you will be notified and can proceed to analysis.
 > - Transcripts are stored and can be viewed or deleted from the dashboard.
 

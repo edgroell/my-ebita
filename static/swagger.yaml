@@ -120,7 +120,7 @@ paths:
       tags:
         - Transcripts
       summary: Fetch earnings call transcript
-      description: Fetch transcript from API Ninjas for specified company and quarter
+      description: Fetch transcript from Alpha Vantage for the specified company and quarter
       security:
         - cookieAuth: []
       requestBody:
