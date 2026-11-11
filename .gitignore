@@ -1,13 +1,15 @@
 # Ignore Python cache files
 
-.idea/
+__pycache__/
 .env
-data/__pycache__/
-services_api/__pycache__/
-services_ai/__pycache__/
-services_data/__pycache__/
-typings/
 .hintrc
+.idea/
+archive/
+data/__pycache__/
 data/chroma_langchain_db/
 data/transcripts_db/
 logs/
+services_ai/__pycache__/
+services_api/__pycache__/
+services_data/__pycache__/
+typings/
