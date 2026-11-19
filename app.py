@@ -7,9 +7,15 @@ Latest: 10-NOV-2025
 
 import os
 from flask import Flask, render_template, Response, request, jsonify, redirect, url_for, flash
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from flask_login import (  # pyright: ignore[reportMissingImports]
+    LoginManager,
+    login_user,
+    logout_user,
+    login_required,
+    current_user,
+)
+from flask_limiter import Limiter  # pyright: ignore[reportMissingImports]
+from flask_limiter.util import get_remote_address  # pyright: ignore[reportMissingImports]
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 import logging
@@ -18,7 +24,7 @@ from functools import wraps
 import time
 from threading import Thread
 from flask_swagger_ui import get_swaggerui_blueprint
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text  # pyright: ignore[reportMissingImports]
 
 # Importing database and data manager
 from data.data_models import db, EarningsCallTranscript, User
@@ -33,7 +39,7 @@ from services_ai.agentic_bot import AgenticBot
 from services_api.alphavantage_service import AlphaVantageService
 from services_api.mistral_service import MistralService
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
 
 # --- Load environment variables ---
 load_dotenv()
