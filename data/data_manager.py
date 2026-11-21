@@ -183,6 +183,41 @@ class DataManager:
         """Return company object by ticker symbol, or None if not found."""
         return Company.query.filter_by(ticker_symbol=ticker_symbol).first()
 
+    def cache_company_search_results(
+        self, matches: List[dict[str, str]]
+    ) -> List[Company]:
+        """Store Alpha Vantage symbol search results for reuse."""
+        try:
+            cached_companies: List[Company] = []
+            seen_symbols: set[str] = set()
+            for match in matches:
+                ticker_symbol = match["symbol"].strip().upper()
+                company_name = match["name"].strip()
+                if (
+                    not ticker_symbol
+                    or not company_name
+                    or ticker_symbol in seen_symbols
+                ):
+                    continue
+                seen_symbols.add(ticker_symbol)
+
+                company = self.get_company_by_ticker(ticker_symbol)
+                if company is None:
+                    company = Company(
+                        ticker_symbol=ticker_symbol,
+                        company_name=company_name,
+                    )
+                    self.db.session.add(company)
+                elif company.company_name == ticker_symbol:
+                    company.company_name = company_name
+                cached_companies.append(company)
+
+            self.db.session.commit()
+            return cached_companies
+        except Exception:
+            self.db.session.rollback()
+            raise
+
     # --- Earnings Call Transcript Management ---
     def add_transcript(self, user_id: int, ticker_symbol: str, fiscal_year: int, fiscal_quarter: int,
                        call_date: Optional[datetime] , transcript_raw: Any,

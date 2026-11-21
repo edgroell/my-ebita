@@ -41,8 +41,16 @@
                 <form id="acquire-form" action="{{ url_for('acquire_transcript') }}" method="POST" class="mt-5 flex flex-1 flex-col gap-3">
                     <div>
                         <label for="ticker" class="mb-1.5 block text-sm font-medium text-slate-700">Ticker symbol</label>
-                        <input type="text" id="ticker" name="ticker" placeholder="e.g., AAPL" required
-                               class="block w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10">
+                        <div class="flex gap-2">
+                            <input type="text" id="ticker" name="ticker" placeholder="e.g., AAPL or TSCO.LON" required
+                                   class="block min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10">
+                            <button id="company-search-button" type="button"
+                                    class="shrink-0 rounded-lg border border-indigo-200 px-3 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                Search
+                            </button>
+                        </div>
+                        <p id="company-search-status" class="mt-1.5 text-xs text-slate-500" role="status" aria-live="polite"></p>
+                        <div id="company-search-results" class="hidden max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm"></div>
                     </div>
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
@@ -202,6 +210,71 @@
 </div>
 
 <script>
+    const tickerInput = document.getElementById('ticker');
+    const companySearchButton = document.getElementById('company-search-button');
+    const companySearchStatus = document.getElementById('company-search-status');
+    const companySearchResults = document.getElementById('company-search-results');
+
+    tickerInput.addEventListener('input', function() {
+        companySearchResults.replaceChildren();
+        companySearchResults.classList.add('hidden');
+        companySearchStatus.textContent = '';
+    });
+
+    companySearchButton.addEventListener('click', async function() {
+        const keywords = tickerInput.value.trim();
+        if (keywords.length < 2) {
+            companySearchStatus.textContent = 'Enter at least 2 characters to search.';
+            return;
+        }
+
+        companySearchButton.disabled = true;
+        companySearchButton.textContent = 'Searching…';
+        companySearchStatus.textContent = '';
+        companySearchResults.replaceChildren();
+        companySearchResults.classList.add('hidden');
+
+        try {
+            const response = await fetch('{{ url_for("search_companies") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keywords })
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || 'Company search failed.');
+            }
+
+            if (!payload.results.length) {
+                companySearchStatus.textContent = 'No matching companies found.';
+                return;
+            }
+
+            payload.results.forEach(function(company) {
+                const option = document.createElement('button');
+                option.type = 'button';
+                option.className = 'block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none';
+                option.textContent = `${company.name} (${company.symbol})`;
+                option.addEventListener('click', function() {
+                    tickerInput.value = company.symbol;
+                    companySearchStatus.textContent = `Selected ${company.name} (${company.symbol}).`;
+                    companySearchResults.replaceChildren();
+                    companySearchResults.classList.add('hidden');
+                });
+                companySearchResults.appendChild(option);
+            });
+            companySearchResults.classList.remove('hidden');
+            companySearchStatus.textContent = payload.cached
+                ? 'Showing saved matches; no Alpha Vantage request was used.'
+                : 'Choose a company to use its exchange-specific ticker.';
+        } catch (error) {
+            companySearchStatus.textContent = error.message || 'Company search failed.';
+        } finally {
+            companySearchButton.disabled = false;
+            companySearchButton.textContent = 'Search';
+        }
+    });
+
     document.getElementById('acquire-form').addEventListener('submit', function() {
         const button = document.getElementById('acquire-button');
         button.disabled = true;

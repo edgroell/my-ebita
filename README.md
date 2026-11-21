@@ -26,7 +26,8 @@ To use this app, run the following command `python app.py`
 > - The core of the app is the Dashboard, where you can acquire new earnings call transcripts and run your analysis.
 
 Acquiring a Transcript
-> - On the dashboard, enter a Ticker Symbol, Fiscal Year, and Fiscal Quarter. The app fetches the transcript, company name, and logo from Alpha Vantage.
+> - On the dashboard, search for a company by name or ticker, select the matching exchange-specific symbol, and choose a Fiscal Year and Fiscal Quarter. You can also enter a ticker directly.
+> - Company names and logos are cached locally after lookup so they can be reused without repeating those Alpha Vantage requests.
 > - If a transcript already exists, you will be notified and can proceed to analysis.
 > - Transcripts are stored and can be viewed or deleted from the dashboard.
 
@@ -37,7 +38,7 @@ Running an AI Analysis
 
 ## Project Status
 
-As of _10-NOV-2025_, project is: _MVP_
+As of _21-NOV-2026_, project is: _MVP_
 
 ## API Documentation
 
@@ -71,7 +72,7 @@ All endpoints require authentication except `/login` and `/register`.
 ✅ LangFuse integration
 
 -> Saving ChatBot Conversations
--> Track AI Analysis too
+-> Moving web search agent tool to staan
 
 ## Acknowledgements
 

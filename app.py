@@ -438,6 +438,65 @@ def dashboard():
                          transcripts=transcripts[:20],
                          companies=companies)
 
+@app.route('/api/v1/companies/search', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def search_companies():
+    """Search Alpha Vantage symbols and cache the matching company names."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "A JSON request body is required."}), 400
+
+    keywords = payload.get("keywords")
+    if not isinstance(keywords, str):
+        return jsonify({"error": "Search keywords are required."}), 400
+    keywords = keywords.strip()
+    if not 2 <= len(keywords) <= 80:
+        return jsonify({"error": "Search keywords must be between 2 and 80 characters."}), 400
+
+    cached_companies = data_manager.get_all_companies(search_query=keywords, limit=10)
+    if cached_companies:
+        return jsonify(
+            {
+                "results": [
+                    {
+                        "symbol": company.ticker_symbol,
+                        "name": company.company_name,
+                    }
+                    for company in cached_companies
+                ],
+                "cached": True,
+            }
+        )
+
+    if not alphavantage_service:
+        return jsonify({"error": "Alpha Vantage service not available."}), 503
+
+    try:
+        matches = alphavantage_service.search_symbols(keywords)
+    except Exception as error:
+        app.logger.error(f"Alpha Vantage company search failed for {keywords!r}: {error}", exc_info=True)
+        return jsonify({"error": f"Company search failed: {error}"}), 502
+
+    try:
+        cached_companies = data_manager.cache_company_search_results(matches)
+    except Exception as error:
+        app.logger.error(f"Failed to cache company search results for {keywords!r}: {error}", exc_info=True)
+        return jsonify({"error": "Could not save company search results."}), 500
+
+    return jsonify(
+        {
+            "results": [
+                {
+                    "symbol": company.ticker_symbol,
+                    "name": company.company_name,
+                }
+                for company in cached_companies
+            ],
+            "cached": False,
+        }
+    )
+
 # -----------------------------------------------------
 # Transcript Acquisition (Step 2-3)
 # -----------------------------------------------------
@@ -476,7 +535,7 @@ def acquire_transcript():
         # Check/create company
         company = data_manager.get_company_by_ticker(ticker)
         company_profile = None
-        if not company or not AlphaVantageService.is_valid_logo_url(company.logo_url):
+        if not company:
             try:
                 company_profile = alphavantage_service.get_company_profile_basic(ticker)
             except Exception as error:
@@ -488,7 +547,7 @@ def acquire_transcript():
             company = data_manager.add_company(
                 ticker_symbol=(company_profile or {}).get('symbol') or ticker,
                 company_name=(company_profile or {}).get('name') or ticker,
-                logo_url=(company_profile or {}).get('logo_url') or None,
+                logo_url=(company_profile or {}).get('logo_url') or "",
             )
             if company:
                 app.logger.info(f"Company created: {ticker}")
@@ -496,17 +555,23 @@ def acquire_transcript():
                 app.logger.error(f"Failed to create company record for {ticker}")
                 flash(f"Failed to create company record for {ticker}.", 'danger')
                 return redirect(url_for('dashboard'))
-        elif company_profile:
-            if company.company_name == ticker and company_profile.get('name'):
-                company.company_name = company_profile['name']
-            company.logo_url = company_profile.get('logo_url') or None
+
+        elif company.logo_url is None or (
+            company.logo_url
+            and not AlphaVantageService.is_valid_logo_url(company.logo_url)
+        ):
+            try:
+                company.logo_url = alphavantage_service.get_company_logo_url(ticker)
+            except Exception as error:
+                company.logo_url = ""
+                app.logger.warning(
+                    f"Could not fetch Alpha Vantage company logo for {ticker}: {error}"
+                )
             try:
                 db.session.commit()
             except Exception as error:
                 db.session.rollback()
-                app.logger.warning(
-                    f"Could not update Alpha Vantage company profile for {ticker}: {error}"
-                )
+                app.logger.warning(f"Could not cache company logo for {ticker}: {error}")
         
         # Fetch transcript from Alpha Vantage
         app.logger.info(f"Fetching transcript from Alpha Vantage: {ticker} Q{quarter} {year}")
@@ -733,7 +798,7 @@ def view_analysis_report(report_id):
         )
     ):
         try:
-            company_profile = alphavantage_service.get_company_profile_basic(
+            company.logo_url = alphavantage_service.get_company_logo_url(
                 company.ticker_symbol
             )
         except Exception as error:
@@ -741,10 +806,6 @@ def view_analysis_report(report_id):
                 f"Could not refresh company logo for {company.ticker_symbol}: {error}"
             )
             company.logo_url = ""
-        else:
-            company.logo_url = (
-                company_profile.get('logo_url') if company_profile else ""
-            )
 
         try:
             db.session.commit()

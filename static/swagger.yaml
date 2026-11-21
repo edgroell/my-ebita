@@ -29,6 +29,8 @@ tags:
     description: User authentication and account management
   - name: Transcripts
     description: Earnings call transcript operations
+  - name: Companies
+    description: Company and ticker search operations
   - name: Analysis
     description: AI analysis operations
   - name: Chatbot
@@ -164,6 +166,54 @@ paths:
           description: Invalid request parameters
         '404':
           description: Transcript not found
+        '429':
+          description: Rate limit exceeded
+
+  /api/v1/companies/search:
+    post:
+      tags:
+        - Companies
+      summary: Search for companies by name or ticker
+      description: Search Alpha Vantage symbols. Results are cached for future searches.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - keywords
+              properties:
+                keywords:
+                  type: string
+                  minLength: 2
+                  maxLength: 80
+                  example: Tesco
+      responses:
+        '200':
+          description: Matching cached companies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        symbol:
+                          type: string
+                          example: TSCO.LON
+                        name:
+                          type: string
+                          example: Tesco PLC
+                  cached:
+                    type: boolean
+        '400':
+          description: Invalid search keywords
         '429':
           description: Rate limit exceeded
 

@@ -23,8 +23,8 @@
                     <img src="{{ company_logo_url }}"
                          alt="{{ company.company_name }} logo"
                          class="max-h-full max-w-full object-contain"
-                         onerror="this.hidden=true; this.nextElementSibling.hidden=false">
-                    <span hidden class="flex h-full w-full items-center justify-center rounded-xl bg-indigo-50 text-2xl font-bold text-indigo-700">{{ company.company_name[:1]|upper }}</span>
+                         onerror="this.hidden=true; this.nextElementSibling.hidden=false; this.nextElementSibling.classList.add('flex')">
+                    <span hidden class="h-full w-full items-center justify-center rounded-xl bg-indigo-50 text-2xl font-bold text-indigo-700">{{ company.company_name[:1]|upper }}</span>
                 {% else %}
                     <span class="flex h-full w-full items-center justify-center rounded-xl bg-indigo-50 text-2xl font-bold text-indigo-700">{{ company.company_name[:1]|upper }}</span>
                 {% endif %}

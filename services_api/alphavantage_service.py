@@ -70,6 +70,53 @@ class AlphaVantageService:
         parsed_url = urlparse(value.strip())
         return parsed_url.scheme in {"http", "https"} and bool(parsed_url.netloc)
 
+    def search_symbols(self, keywords: str) -> List[Dict[str, str]]:
+        """Search Alpha Vantage for matching stock symbols."""
+        if not keywords or not keywords.strip():
+            raise ValueError("Search keywords cannot be empty.")
+
+        response_data = self._request_json(
+            {
+                "function": "SYMBOL_SEARCH",
+                "keywords": keywords.strip(),
+                "apikey": self.api_key,
+            }
+        )
+        matches = response_data.get("bestMatches", [])
+        if not isinstance(matches, list):
+            raise ValueError("Unexpected symbol search format from Alpha Vantage.")
+
+        results: List[Dict[str, str]] = []
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            symbol = match.get("1. symbol")
+            name = match.get("2. name")
+            if not isinstance(symbol, str) or not symbol.strip():
+                continue
+            if not isinstance(name, str) or not name.strip():
+                continue
+            results.append(
+                {"symbol": symbol.strip().upper(), "name": name.strip()}
+            )
+
+        return results
+
+    def get_company_logo_url(self, ticker: str) -> str:
+        """Fetch a company's logo URL without requesting its overview."""
+        if not ticker or not ticker.strip():
+            raise ValueError("Ticker cannot be empty.")
+
+        logo = self._request_json(
+            {
+                "function": "COMPANY_LOGO",
+                "symbol": ticker.strip().upper(),
+                "apikey": self.api_key,
+            }
+        )
+        logo_url = logo.get("logo_url_png") or logo.get("logo_url_svg")
+        return logo_url if self.is_valid_logo_url(logo_url) else ""
+
     def get_company_profile_basic(self, ticker: str) -> Optional[Dict[str, str]]:
         """Fetch a company's display name and logo URL."""
         if not ticker or not ticker.strip():
@@ -87,14 +134,7 @@ class AlphaVantageService:
         if not isinstance(company_name, str) or not company_name.strip():
             return None
 
-        logo = self._request_json(
-            {
-                "function": "COMPANY_LOGO",
-                "symbol": symbol,
-                "apikey": self.api_key,
-            }
-        )
-        logo_url = logo.get("logo_url_png") or logo.get("logo_url_svg")
+        logo_url = self.get_company_logo_url(symbol)
         if not self.is_valid_logo_url(logo_url):
             logo_url = ""
             official_site = overview.get("OfficialSite")
