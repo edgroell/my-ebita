@@ -2,7 +2,7 @@
 My EBITA* - An AI Financial Sidekick
 *EBITA: Earnings Beat Indicator & Text Analyzer
 by Ed Groell
-Latest: 10-NOV-2025
+Latest: 21-NOV-2026
 """
 
 import os
