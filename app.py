@@ -463,6 +463,16 @@ def acquire_transcript():
         return redirect(url_for('dashboard'))
     
     try:
+        # Check if transcript exists before making any Alpha Vantage requests.
+        if year is None or quarter is None:
+            flash("Year and quarter are required.", 'danger')
+            return redirect(url_for('dashboard'))
+        existing = data_manager.get_transcript_by_details(ticker, year, quarter)
+        if existing:
+            app.logger.info(f"Transcript already exists: {ticker} Q{quarter} {year} (ID: {existing.transcript_id})")
+            flash(f"Transcript already exists (ID: {existing.transcript_id})", 'info')
+            return redirect(url_for('dashboard'))
+
         # Check/create company
         company = data_manager.get_company_by_ticker(ticker)
         company_profile = None
@@ -497,16 +507,6 @@ def acquire_transcript():
                 app.logger.warning(
                     f"Could not update Alpha Vantage company profile for {ticker}: {error}"
                 )
-        
-        # Check if transcript exists
-        if year is None or quarter is None:
-            flash("Year and quarter are required.", 'danger')
-            return redirect(url_for('dashboard'))
-        existing = data_manager.get_transcript_by_details(ticker, year, quarter)
-        if existing:
-            app.logger.info(f"Transcript already exists: {ticker} Q{quarter} {year} (ID: {existing.transcript_id})")
-            flash(f"Transcript already exists (ID: {existing.transcript_id})", 'info')
-            return redirect(url_for('dashboard'))
         
         # Fetch transcript from Alpha Vantage
         app.logger.info(f"Fetching transcript from Alpha Vantage: {ticker} Q{quarter} {year}")

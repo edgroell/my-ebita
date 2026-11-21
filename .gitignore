@@ -12,4 +12,5 @@ logs/
 services_ai/__pycache__/
 services_api/__pycache__/
 services_data/__pycache__/
+tests/
 typings/

@@ -1,5 +1,7 @@
 """Client for fetching earnings call transcripts from Alpha Vantage."""
 
+import threading
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, urlparse
 
@@ -9,16 +11,29 @@ import requests
 class AlphaVantageService:
     """Fetch earnings call transcripts from the Alpha Vantage API."""
 
+    _MIN_REQUEST_INTERVAL_SECONDS = 1.1
+
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("ALPHA_VANTAGE_API_KEY cannot be empty.")
 
         self.api_key = api_key
         self.base_url = "https://www.alphavantage.co/query"
+        self._request_lock = threading.Lock()
+        self._last_request_at: Optional[float] = None
 
     def _request_json(self, params: Dict[str, str]) -> Dict[str, Any]:
         try:
-            response = requests.get(self.base_url, params=params, timeout=30)
+            with self._request_lock:
+                now = time.monotonic()
+                if self._last_request_at is not None:
+                    wait = self._MIN_REQUEST_INTERVAL_SECONDS - (
+                        now - self._last_request_at
+                    )
+                    if wait > 0:
+                        time.sleep(wait)
+                self._last_request_at = time.monotonic()
+                response = requests.get(self.base_url, params=params, timeout=30)
             response.raise_for_status()
             response_data = response.json()
         except requests.exceptions.HTTPError as error:
