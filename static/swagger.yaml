@@ -1,180 +1,259 @@
-openapi: 3.0.0
+openapi: 3.0.3
 info:
-  title: My EBITA API
-  description: |
-    **My EBITA** - Earnings Beat Indicator & Text Analyzer
-    
-    An AI Financial Sidekick that provides earnings call analysis using Mistral.
-    
-    ## Features
-    - Multi-user support with authentication
-    - Earnings transcript acquisition and storage
-    - Mistral-powered earnings call analysis
-    - RAG-powered conversational chatbot
-    - Conversation history download
-    
-    ## Authentication
-    Most endpoints require authentication. Use the `/login` endpoint to obtain a session cookie.
+  title: My EBITA
   version: 1.0.0
-  contact:
-    name: Ed Groell
-    email: email@edgroell.com
+  description: |
+    My EBITA provides earnings-call transcript acquisition, analysis, and chat.
 
+    The application uses Flask session authentication. Sign in through `POST /login`
+    and send the resulting `session` cookie with authenticated requests.
+
+    Some operations are server-rendered form workflows and redirect to the dashboard
+    rather than returning JSON. Their request and response formats are documented as
+    implemented.
 servers:
-  - url: http://localhost:5000
-    description: Local development server
+  - url: /
+    description: Same origin as the application
 
 tags:
+  - name: System
+    description: Service health
   - name: Authentication
-    description: User authentication and account management
-  - name: Transcripts
-    description: Earnings call transcript operations
+    description: Registration and session management
   - name: Companies
-    description: Company and ticker search operations
+    description: Company and ticker search
+  - name: Transcripts
+    description: Transcript acquisition and retrieval
   - name: Analysis
-    description: AI analysis operations
-  - name: Chatbot
-    description: Conversational AI chatbot
-  - name: User
-    description: User profile and settings
+    description: Transcript analysis and report access
+  - name: Chat
+    description: Transcript chat and conversation history
+  - name: Web pages
+    description: Server-rendered application pages
 
 paths:
-  /login:
+  /:
+    get:
+      tags: [Web pages]
+      summary: Home page
+      operationId: getHomePage
+      responses:
+        '200':
+          description: Home page
+          content:
+            text/html:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
+
+  /register:
+    get:
+      tags: [Authentication]
+      summary: Registration page
+      operationId: getRegistrationPage
+      responses:
+        '200':
+          description: Registration form
+          content:
+            text/html:
+              schema:
+                type: string
     post:
-      tags:
-        - Authentication
-      summary: User login
-      description: Authenticate user and create session
+      tags: [Authentication]
+      summary: Register an account
+      operationId: register
+      description: |
+        Accepts either form data or JSON. Successful registration redirects to
+        `/login`; validation errors render the registration page with a message.
       requestBody:
         required: true
         content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RegistrationRequest'
           application/json:
             schema:
-              type: object
-              required:
-                - username
-                - password
-              properties:
-                username:
-                  type: string
-                  example: johndoe
-                password:
-                  type: string
-                  format: password
-                  example: securepassword123
-                remember_me:
-                  type: boolean
-                  default: false
-                  description: Keep user logged in for 30 days
+              $ref: '#/components/schemas/RegistrationRequest'
       responses:
-        '302':
-          description: Successful login, redirects to dashboard
         '200':
-          description: Login page rendered (GET request)
+          description: Registration form re-rendered after a validation failure
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          description: Registration succeeded; redirected to the login page
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
+
+  /login:
+    get:
+      tags: [Authentication]
+      summary: Login page
+      operationId: getLoginPage
+      responses:
+        '200':
+          description: Login form
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      tags: [Authentication]
+      summary: Sign in
+      operationId: login
+      description: |
+        Accepts either form data or JSON. A successful login sets the Flask
+        `session` cookie and redirects to `/dashboard`. Invalid credentials
+        re-render the login page with a message.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login form re-rendered after a failed login
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          description: Login succeeded; redirected to the dashboard
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              description: Flask session cookie
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
 
   /logout:
     get:
-      tags:
-        - Authentication
-      summary: User logout
-      description: Logout user and clean up active sessions
+      tags: [Authentication]
+      summary: Sign out
+      operationId: logout
       security:
         - cookieAuth: []
       responses:
         '302':
-          description: Successful logout, redirects to home
+          description: Session cleared; redirected to the home page
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
 
-  /register:
-    post:
-      tags:
-        - Authentication
-      summary: Register new user
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - username
-                - email
-                - password
-              properties:
-                username:
-                  type: string
-                  minLength: 3
-                  example: johndoe
-                email:
-                  type: string
-                  format: email
-                  example: john@example.com
-                password:
-                  type: string
-                  format: password
-                  minLength: 6
-                  example: securepassword123
-      responses:
-        '302':
-          description: Registration successful, redirects to dashboard
-
-  /api/v1/transcripts/fetch:
-    post:
-      tags:
-        - Transcripts
-      summary: Fetch earnings call transcript
-      description: Fetch transcript from Alpha Vantage for the specified company and quarter
+  /profile:
+    get:
+      tags: [Web pages]
+      summary: Profile page
+      operationId: getProfilePage
       security:
         - cookieAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - ticker
-                - year
-                - quarter
-              properties:
-                ticker:
-                  type: string
-                  example: AAPL
-                  description: Stock ticker symbol
-                year:
-                  type: integer
-                  example: 2024
-                  description: Fiscal year
-                quarter:
-                  type: integer
-                  minimum: 1
-                  maximum: 4
-                  example: 3
-                  description: Fiscal quarter (1-4)
       responses:
         '200':
-          description: Transcript fetched successfully
+          description: Profile form
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          $ref: '#/components/responses/LoginRequired'
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
+    post:
+      tags: [Authentication]
+      summary: Update the current user's profile
+      operationId: updateProfile
+      security:
+        - cookieAuth: []
+      description: |
+        Accepts either form data or JSON. `current_password` is required. A
+        successful update redirects back to `/profile`; validation errors render
+        the profile page with a message.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+      responses:
+        '200':
+          description: Profile form re-rendered after a validation failure
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          description: Profile updated or login required
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
+
+  /dashboard:
+    get:
+      tags: [Web pages]
+      summary: Dashboard
+      operationId: getDashboard
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Dashboard page
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          $ref: '#/components/responses/LoginRequired'
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
+
+  /api/v1/status:
+    get:
+      tags: [System]
+      summary: API health
+      operationId: getApiStatus
+      description: Public health check. Service flags indicate configuration/initialization, not upstream availability.
+      responses:
+        '200':
+          description: API status
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  transcript_id:
-                    type: integer
-        '400':
-          description: Invalid request parameters
-        '404':
-          description: Transcript not found
+                $ref: '#/components/schemas/HealthStatus'
         '429':
-          description: Rate limit exceeded
+          $ref: '#/components/responses/RateLimited'
 
   /api/v1/companies/search:
     post:
-      tags:
-        - Companies
+      tags: [Companies]
       summary: Search for companies by name or ticker
-      description: Search Alpha Vantage symbols. Results are cached for future searches.
+      operationId: searchCompanies
+      description: |
+        Searches Alpha Vantage on a cache miss and stores matching symbols locally.
+        Repeated searches that match stored companies are served without an
+        Alpha Vantage request. Limited to 10 requests per hour.
       security:
         - cookieAuth: []
       requestBody:
@@ -182,187 +261,282 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - keywords
-              properties:
-                keywords:
-                  type: string
-                  minLength: 2
-                  maxLength: 80
-                  example: Tesco
+              $ref: '#/components/schemas/CompanySearchRequest'
       responses:
         '200':
-          description: Matching cached companies
+          description: Matching companies; `cached` is true when returned from the local database
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  results:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        symbol:
-                          type: string
-                          example: TSCO.LON
-                        name:
-                          type: string
-                          example: Tesco PLC
-                  cached:
-                    type: boolean
+                $ref: '#/components/schemas/CompanySearchResponse'
+        '302':
+          $ref: '#/components/responses/LoginRequired'
         '400':
-          description: Invalid search keywords
+          $ref: '#/components/responses/BadRequest'
         '429':
-          description: Rate limit exceeded
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '502':
+          description: Alpha Vantage search failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Alpha Vantage service is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
-  /api/v1/transcripts/{transcript_id}:
+  /api/v1/acquire_transcript:
+    post:
+      tags: [Transcripts]
+      summary: Acquire an earnings-call transcript
+      operationId: acquireTranscript
+      description: |
+        Fetches and stores a transcript, creating company metadata if needed.
+        This is a form workflow: success, duplicate, and most validation failures
+        redirect to `/dashboard` with a flash message. Limited to 10 requests per hour.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TranscriptAcquisitionRequest'
+      responses:
+        '302':
+          description: Redirected to the dashboard or login page
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          description: Alpha Vantage service is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /transcripts/{transcript_id}:
     get:
-      tags:
-        - Transcripts
-      summary: Get transcript by ID
+      tags: [Web pages]
+      summary: Transcript page
+      operationId: getTranscriptPage
       security:
         - cookieAuth: []
       parameters:
-        - name: transcript_id
-          in: path
-          required: true
-          schema:
-            type: integer
+        - $ref: '#/components/parameters/TranscriptId'
       responses:
         '200':
-          description: Transcript details
+          description: Transcript page
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          description: Login required or transcript not found
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
+
+  /api/v1/transcripts/{transcript_id}:
+    get:
+      tags: [Transcripts]
+      summary: Get transcript data
+      operationId: getTranscript
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TranscriptId'
+      responses:
+        '200':
+          description: Transcript data
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Transcript'
+        '302':
+          $ref: '#/components/responses/LoginRequired'
         '404':
-          description: Transcript not found
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
-    delete:
-      tags:
-        - Transcripts
-      summary: Delete transcript
+  /api/v1/transcripts/{transcript_id}/delete:
+    post:
+      tags: [Transcripts]
+      summary: Delete a transcript
+      operationId: deleteTranscript
+      description: Deletes the transcript and its associated analysis reports.
       security:
         - cookieAuth: []
       parameters:
-        - name: transcript_id
-          in: path
-          required: true
-          schema:
-            type: integer
+        - $ref: '#/components/parameters/TranscriptId'
       responses:
-        '200':
-          description: Transcript deleted successfully
-        '404':
-          description: Transcript not found
+        '302':
+          description: Redirected to the dashboard; includes the result message
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
-  /api/v1/analysis/run:
+  /api/v1/analysis:
     post:
-      tags:
-        - Analysis
-      summary: Run AI analysis on transcript
-      description: Analyze transcript using Mistral
+      tags: [Analysis]
+      summary: Analyze a transcript
+      operationId: requestAnalysis
+      description: |
+        Runs Mistral analysis and stores a report. This form workflow redirects
+        to `/dashboard` with a flash message on success or failure. Limited to
+        5 requests per hour.
       security:
         - cookieAuth: []
       requestBody:
         required: true
         content:
-          application/json:
+          application/x-www-form-urlencoded:
             schema:
               type: object
-              required:
-                - transcript_id
+              required: [transcript_id]
               properties:
                 transcript_id:
                   type: integer
+                  minimum: 1
                   example: 123
       responses:
-        '200':
-          description: Analysis completed successfully
-          content:
-            application/json:
+        '302':
+          description: Redirected to the dashboard with the result message
+          headers:
+            Location:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  report_id:
-                    type: integer
-                  redirect_url:
-                    type: string
-        '400':
-          description: Invalid request
-        '404':
-          description: Transcript not found
+                type: string
         '429':
-          description: Rate limit exceeded
+          $ref: '#/components/responses/RateLimited'
 
-  /api/v1/reports/{report_id}:
-    get:
-      tags:
-        - Analysis
-      summary: Get analysis report
+  /api/v1/reports/{report_id}/delete:
+    post:
+      tags: [Analysis]
+      summary: Delete an analysis report
+      operationId: deleteAnalysisReport
       security:
         - cookieAuth: []
       parameters:
-        - name: report_id
-          in: path
-          required: true
-          schema:
-            type: integer
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '302':
+          description: Redirected to the dashboard; includes the result message
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /analysis/{report_id}:
+    get:
+      tags: [Analysis]
+      summary: Analysis report page
+      operationId: getAnalysisReportPage
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
       responses:
         '200':
           description: Analysis report HTML page
-        '404':
-          description: Report not found
+          content:
+            text/html:
+              schema:
+                type: string
+        '302':
+          description: Login required, report not found, or access denied
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/WebRateLimited'
 
-    delete:
-      tags:
-        - Analysis
-      summary: Delete analysis report
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: report_id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Report deleted successfully
-        '404':
-          description: Report not found
-
-  /api/v1/reports/{report_id}/download:
+  /api/v1/reports/{report_id}/raw/{ai_name}:
     get:
-      tags:
-        - Analysis
-      summary: Download report as JSON
+      tags: [Analysis]
+      summary: Get raw analysis result
+      operationId: getRawAnalysis
       security:
         - cookieAuth: []
       parameters:
-        - name: report_id
+        - $ref: '#/components/parameters/ReportId'
+        - name: ai_name
           in: path
           required: true
+          description: Only the `mistral` analysis is currently supported
           schema:
-            type: integer
+            type: string
+            enum: [mistral]
       responses:
         '200':
-          description: Report JSON file
+          description: Full Mistral analysis result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AnalysisReport'
+                $ref: '#/components/schemas/AnalysisResult'
+        '302':
+          $ref: '#/components/responses/LoginRequired'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/v1/reports/{report_id}/download:
+    get:
+      tags: [Analysis]
+      summary: Download a report
+      operationId: downloadAnalysisReport
+      description: Returns a simplified analysis JSON document as an attachment.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: Downloadable report JSON
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisReportDownload'
+        '302':
+          description: Login required, report not found, or access denied
+          headers:
+            Location:
+              schema:
+                type: string
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /api/v1/chat:
     post:
-      tags:
-        - Chatbot
-      summary: Send message to chatbot
-      description: Chat with AI assistant about the earnings call transcript
+      tags: [Chat]
+      summary: Send a message about a transcript
+      operationId: chatWithTranscript
       security:
         - cookieAuth: []
       requestBody:
@@ -370,129 +544,104 @@ paths:
         content:
           application/json:
             schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Generated response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '302':
+          $ref: '#/components/responses/LoginRequired'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          description: RAG system is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/transcripts/{transcript_id}/chat/stream:
+    post:
+      tags: [Chat]
+      summary: Stream a chat response
+      operationId: streamChat
+      description: |
+        Returns server-sent events. Each event is a `data:` line followed by a
+        blank line. Stream-time errors are sent as event data after the HTTP
+        response has started.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TranscriptId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
               type: object
-              required:
-                - transcript_id
-                - message
+              required: [message]
               properties:
-                transcript_id:
-                  type: integer
-                  example: 123
                 message:
                   type: string
+                  minLength: 1
                   example: What were the main revenue drivers?
       responses:
         '200':
-          description: Bot response
+          description: Server-sent response chunks
           content:
-            application/json:
+            text/event-stream:
               schema:
-                type: object
-                properties:
-                  response:
-                    type: string
-                  transcript_id:
-                    type: integer
+                type: string
+              example: "data: Revenue growth was driven by cloud services.\n\n"
+        '302':
+          $ref: '#/components/responses/LoginRequired'
         '400':
-          description: Invalid request
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
-          description: Rate limit exceeded (20 per minute)
+          $ref: '#/components/responses/RateLimited'
 
   /api/v1/chat/history/{transcript_id}:
     get:
-      tags:
-        - Chatbot
+      tags: [Chat]
       summary: Download conversation history
-      description: Download full conversation history as JSON file
+      operationId: getChatHistory
       security:
         - cookieAuth: []
       parameters:
-        - name: transcript_id
-          in: path
-          required: true
-          schema:
-            type: integer
+        - $ref: '#/components/parameters/TranscriptId'
       responses:
         '200':
-          description: Conversation history JSON file
+          description: Conversation history or an empty-history response
+          headers:
+            Content-Disposition:
+              description: Present when a conversation export is available
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConversationHistory'
-
-  /api/v1/chat/clear/{transcript_id}:
-    post:
-      tags:
-        - Chatbot
-      summary: Clear conversation history
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: transcript_id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: History cleared successfully
+                oneOf:
+                  - $ref: '#/components/schemas/ConversationHistory'
+                  - $ref: '#/components/schemas/EmptyConversationHistory'
+        '302':
+          $ref: '#/components/responses/LoginRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
-          description: Rate limit exceeded (10 per hour)
-
-  /api/v1/chat/close/{transcript_id}:
-    post:
-      tags:
-        - Chatbot
-      summary: Close chat session
-      description: Clean up and close the active chat session
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: transcript_id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Session closed successfully
-        '403':
-          description: Unauthorized - not your session
-
-  /api/v1/user/profile:
-    get:
-      tags:
-        - User
-      summary: Get user profile
-      security:
-        - cookieAuth: []
-      responses:
-        '200':
-          description: User profile page
-
-  /api/v1/user/stats:
-    get:
-      tags:
-        - User
-      summary: Get user statistics
-      security:
-        - cookieAuth: []
-      responses:
-        '200':
-          description: User statistics
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  total_transcripts:
-                    type: integer
-                  total_reports:
-                    type: integer
-                  recent_activity:
-                    type: array
-                    items:
-                      type: object
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
 
 components:
   securitySchemes:
@@ -500,11 +649,215 @@ components:
       type: apiKey
       in: cookie
       name: session
-      description: Session cookie obtained via /login
+      description: Flask session cookie set by a successful login
+
+  parameters:
+    TranscriptId:
+      name: transcript_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    ReportId:
+      name: report_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+
+  responses:
+    LoginRequired:
+      description: Login required; redirected to `/login`
+      headers:
+        Location:
+          schema:
+            type: string
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The current user cannot access this resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Request rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    WebRateLimited:
+      description: Request rate limit exceeded
+      content:
+        text/html:
+          schema:
+            type: string
+    ServerError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
 
   schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: Transcript not found
+
+    LoginRequest:
+      type: object
+      required: [password]
+      anyOf:
+        - required: [username]
+        - required: [username_or_email]
+      properties:
+        username:
+          type: string
+          example: johndoe
+          description: Use this or `username_or_email`.
+        username_or_email:
+          type: string
+          description: Accepted as an alternative to `username`.
+        password:
+          type: string
+          format: password
+        remember_me:
+          type: boolean
+          default: false
+
+    RegistrationRequest:
+      type: object
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 2
+          pattern: '^[A-Za-z0-9_-]+$'
+          example: johndoe
+        email:
+          type: string
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          minLength: 1
+
+    ProfileUpdateRequest:
+      type: object
+      required: [current_password]
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+        confirm_password:
+          type: string
+          format: password
+
+    HealthStatus:
+      type: object
+      required: [status, message, services, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        message:
+          type: string
+          example: EBITA API is operational
+        services:
+          type: object
+          required: [alphavantage, mistral, rag]
+          properties:
+            alphavantage:
+              type: boolean
+            mistral:
+              type: boolean
+            rag:
+              type: boolean
+        timestamp:
+          type: string
+          format: date-time
+
+    CompanySearchRequest:
+      type: object
+      required: [keywords]
+      properties:
+        keywords:
+          type: string
+          minLength: 2
+          maxLength: 80
+          example: Tesco
+
+    CompanySearchResult:
+      type: object
+      required: [symbol, name]
+      properties:
+        symbol:
+          type: string
+          example: TSCO.LON
+        name:
+          type: string
+          example: Tesco PLC
+
+    CompanySearchResponse:
+      type: object
+      required: [results, cached]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanySearchResult'
+        cached:
+          type: boolean
+          description: True when results were served from the local company database
+
+    TranscriptAcquisitionRequest:
+      type: object
+      required: [ticker, year, quarter]
+      properties:
+        ticker:
+          type: string
+          example: TSCO.LON
+          description: Alpha Vantage symbol; include an exchange suffix when applicable
+        year:
+          type: integer
+          example: 2024
+        quarter:
+          type: integer
+          example: 3
+
     Transcript:
       type: object
+      required:
+        - transcript_id
+        - ticker_symbol
+        - fiscal_year
+        - fiscal_quarter
+        - call_date
+        - transcript_raw
+        - source_url
       properties:
         transcript_id:
           type: integer
@@ -514,47 +867,141 @@ components:
           type: integer
         fiscal_quarter:
           type: integer
+          minimum: 1
+          maximum: 4
         call_date:
           type: string
-          format: date
+          format: date-time
+          nullable: true
         transcript_raw:
           type: string
-        company:
-          type: object
-          properties:
-            company_name:
-              type: string
-            logo_url:
-              type: string
+        source_url:
+          type: string
+          nullable: true
 
-    AnalysisReport:
+    AnalysisResult:
       type: object
+      required:
+        - structured_output
+        - request_time_ms
+        - model
+        - temperature
+        - max_tokens
+        - total_tokens
+        - prompt_tokens
+        - completion_tokens
+      properties:
+        structured_output:
+          $ref: '#/components/schemas/StructuredAnalysis'
+        request_time_ms:
+          type: number
+          format: float
+        model:
+          type: string
+        temperature:
+          type: number
+          format: float
+        max_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+
+    StructuredAnalysis:
+      type: object
+      required:
+        - summary
+        - concise_rationale
+        - overall_sentiment
+        - key_metrics
+        - key_topics
+        - red_flags
+      properties:
+        summary:
+          type: string
+        concise_rationale:
+          type: string
+        overall_sentiment:
+          type: string
+          description: The model is prompted to use Positive, Neutral, or Negative.
+        key_metrics:
+          $ref: '#/components/schemas/AnalysisKeyMetrics'
+        key_topics:
+          type: array
+          items:
+            type: string
+        red_flags:
+          type: array
+          items:
+            type: string
+
+    AnalysisKeyMetrics:
+      type: object
+      required: [management_confidence_score, evasiveness_score_q_a]
+      properties:
+        management_confidence_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        evasiveness_score_q_a:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    AnalysisReportDownload:
+      type: object
+      required: [report_id, company, transcript, analysis_date, mistral]
       properties:
         report_id:
           type: integer
-        transcript_id:
-          type: integer
+        company:
+          type: object
+          required: [name, ticker, logo_url]
+          properties:
+            name:
+              type: string
+            ticker:
+              type: string
+            logo_url:
+              type: string
+              nullable: true
+        transcript:
+          type: object
+          required: [fiscal_year, fiscal_quarter, call_date]
+          properties:
+            fiscal_year:
+              type: integer
+            fiscal_quarter:
+              type: integer
+            call_date:
+              type: string
+              format: date-time
+              nullable: true
         analysis_date:
           type: string
           format: date-time
+          nullable: true
         mistral:
           type: object
           properties:
             summary:
               type: string
+              nullable: true
             concise_rationale:
               type: string
+              nullable: true
             overall_sentiment:
               type: string
-              enum: [Positive, Neutral, Negative]
+              nullable: true
             management_confidence_score:
               type: integer
-              minimum: 0
-              maximum: 100
+              nullable: true
             evasiveness_score_q_a:
               type: integer
-              minimum: 0
-              maximum: 100
+              nullable: true
             key_topics_discussed:
               type: array
               items:
@@ -565,14 +1012,39 @@ components:
                 type: string
             request_ms:
               type: number
+              nullable: true
+
+    ChatRequest:
+      type: object
+      required: [transcript_id, message]
+      properties:
+        transcript_id:
+          type: integer
+          minimum: 1
+          example: 123
+        message:
+          type: string
+          minLength: 1
+          example: What were the main revenue drivers?
+
+    ChatResponse:
+      type: object
+      required: [response, transcript_id]
+      properties:
+        response:
+          type: string
+        transcript_id:
+          type: integer
 
     ConversationHistory:
       type: object
+      required: [transcript_id, company, fiscal_info, conversation]
       properties:
         transcript_id:
           type: integer
         company:
           type: object
+          required: [name, ticker]
           properties:
             name:
               type: string
@@ -580,6 +1052,7 @@ components:
               type: string
         fiscal_info:
           type: object
+          required: [year, quarter, call_date]
           properties:
             year:
               type: integer
@@ -587,9 +1060,11 @@ components:
               type: integer
             call_date:
               type: string
-              format: date
+              format: date-time
+              nullable: true
         conversation:
           type: object
+          required: [total_turns, export_date, user_id, username, turns]
           properties:
             total_turns:
               type: integer
@@ -604,8 +1079,17 @@ components:
               type: array
               items:
                 type: object
-                properties:
-                  question:
-                    type: string
-                  answer:
-                    type: string
+                additionalProperties: true
+
+    EmptyConversationHistory:
+      type: object
+      required: [history, message]
+      properties:
+        history:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        message:
+          type: string
+          example: No conversation history found
