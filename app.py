@@ -126,7 +126,10 @@ vector_store = None
 rag_manager = None
 try:
     vector_store = ChromaVectorStore(api_key=MISTRAL_API_KEY)
-    rag_manager = RAGManager(vector_store=vector_store)
+    rag_manager = RAGManager(
+        vector_store=vector_store,
+        mistral_service=mistral_service,
+    )
     app.logger.info("RAG Manager initialized successfully")
 except Exception as e:
     app.logger.error(f"Failed to initialize RAG Manager: {e}")

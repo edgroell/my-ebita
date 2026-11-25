@@ -4,11 +4,29 @@ import os
 from pathlib import Path
 from typing import List, Optional, Any, Dict
 
-import httpx
-from langchain_chroma import Chroma
-from langchain_mistralai import MistralAIEmbeddings
-from pydantic import SecretStr
-from tokenizers import Tokenizer
+from importlib import import_module
+
+
+# Load optional third-party dependencies lazily so that the module remains
+# importable even when the embedding environment is not fully installed.
+def _load_module(module_name: str) -> Any:
+    try:
+        return import_module(module_name)
+    except (ImportError, ModuleNotFoundError):
+        return None
+
+
+_httpx = _load_module("httpx")
+_langchain_chroma = _load_module("langchain_chroma")
+_langchain_mistralai = _load_module("langchain_mistralai")
+_pydantic = _load_module("pydantic")
+_tokenizers = _load_module("tokenizers")
+
+Chroma = getattr(_langchain_chroma, "Chroma", None)
+MistralAIEmbeddings = getattr(_langchain_mistralai, "MistralAIEmbeddings", None)
+SecretStr = getattr(_pydantic, "SecretStr", None)
+Tokenizer = getattr(_tokenizers, "Tokenizer", ())
+HTTPStatusError = getattr(_httpx, "HTTPStatusError", ())
 
 
 MAX_EMBEDDING_CHUNK_TOKENS = 6000
@@ -40,6 +58,12 @@ class ChromaVectorStore:
             raise ValueError(
                 "Mistral API key is required for embeddings. "
                 "Set MISTRAL_API_KEY or pass api_key."
+            )
+
+        if MistralAIEmbeddings is None or SecretStr is None or Chroma is None:
+            raise RuntimeError(
+                "Chroma, MistralAIEmbeddings, and pydantic are required "
+                "to initialize the vector store."
             )
         
         self.embeddings = MistralAIEmbeddings(
@@ -111,7 +135,7 @@ class ChromaVectorStore:
                 texts=chunked_texts,
                 metadatas=chunked_metadatas,
             )
-        except httpx.HTTPStatusError as error:
+        except HTTPStatusError as error:
             response_body = error.response.text
             raise RuntimeError(
                 f"Mistral embeddings request failed with HTTP "

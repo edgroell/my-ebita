@@ -4,8 +4,8 @@ from typing import Optional, List, Any
 from datetime import datetime
 
 from .data_models import User, Company, EarningsCallTranscript, AnalysisReport
-from sqlalchemy import select, or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, or_  # type: ignore[import-not-found]
+from sqlalchemy.exc import IntegrityError  # type: ignore[import-not-found]
 
 
 class DataManager:

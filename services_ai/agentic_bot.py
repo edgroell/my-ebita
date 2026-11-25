@@ -1,16 +1,16 @@
 # Agentic bot using pydantic_ai with RAG, web search, and conversation history.
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore[reportMissingImports]
 import os
 from typing import List, Dict
 import asyncio
-import requests
+import requests  # type: ignore[reportMissingModuleSource]
 from datetime import datetime
 
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.mistral import MistralModel
-from pydantic_ai.providers.mistral import MistralProvider
-from pydantic import BaseModel
+from pydantic_ai import Agent, RunContext  # type: ignore[reportMissingImports]
+from pydantic_ai.models.mistral import MistralModel  # type: ignore[reportMissingImports]
+from pydantic_ai.providers.mistral import MistralProvider  # type: ignore[reportMissingImports]
+from pydantic import BaseModel  # type: ignore[reportMissingImports]
 
 from .rag_manager import RAGManager
 from services_api.mistral_service import MistralService
@@ -61,8 +61,8 @@ class AgenticBot:
         self._lf = None
         if LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY and LANGFUSE_HOST:
             try:
-                from langfuse import Langfuse
-                import langfuse
+                langfuse = __import__("langfuse")
+                Langfuse = getattr(langfuse, "Langfuse")
                 
                 self._lf = Langfuse(
                     public_key=LANGFUSE_PUBLIC_KEY,
@@ -597,7 +597,10 @@ if __name__ == "__main__":
     mistral_service = MistralService(api_key=mistral_api_key)
     print("Initializing vector store and RAG manager...")
     vector_store = ChromaVectorStore()
-    rag_manager = RAGManager(vector_store=vector_store)
+    rag_manager = RAGManager(
+        vector_store=vector_store,
+        mistral_service=mistral_service,
+    )
 
     print("\nCreating agentic bot...")
     bot = AgenticBot(

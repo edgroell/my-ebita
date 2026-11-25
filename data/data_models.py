@@ -1,11 +1,10 @@
 # Data models for the application
 
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import UniqueConstraint
+from flask_sqlalchemy import SQLAlchemy  # type: ignore[import-not-found]
+from sqlalchemy import UniqueConstraint  # type: ignore[import-not-found]
 from datetime import datetime
-from flask_login import UserMixin
+from flask_login import UserMixin  # type: ignore[import-not-found]
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy.orm import validates
 import re
 
 db = SQLAlchemy()
